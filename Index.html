@@ -3,6 +3,13 @@
 <head>
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <!-- 홈 화면에 추가했을 때 앱처럼 보이도록 -->
+  <meta name="theme-color" content="#8C1D33">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="와인">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="data:image/png;base64,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">
+  <link rel="icon" type="image/png" href="data:image/png;base64,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">
   <style>
     :root {
       --bg:#FAF6F1; --surface:#FFFFFF; --line:#EDE3D8;
@@ -19,6 +26,14 @@
       background:var(--bg); color:var(--tx);
       padding-bottom:86px; font-size:15px;
     }
+    /* 배경 와인잔 워터마크 — 빈 공간에만 은은하게 비친다 */
+    body::before {
+      content:''; position:fixed; z-index:0; pointer-events:none;
+      left:50%; bottom:2%; transform:translateX(-50%);
+      width:min(88vw, 380px); height:60vh; opacity:.045;
+      background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M31 17h38v13c0 10.5-8.5 19-19 19s-19-8.5-19-19z' fill='%238C1D33'/%3E%3Cpath d='M48 49h4v26h-4z' fill='%238C1D33'/%3E%3Crect x='33' y='75' width='34' height='5.5' rx='2.75' fill='%238C1D33'/%3E%3C/svg%3E") no-repeat center/contain;
+    }
+    header, main, nav { position:relative; z-index:1; }
     main { padding:0 16px; }
     .page { display:none; }
     .page.on { display:block; animation:fade .18s ease; }
@@ -30,7 +45,10 @@
       display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px;
       color:#fff;
     }
-    #pinScreen .glass { font-size:60px; }
+    #pinScreen .glass {
+      width:82px; height:82px;
+      background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M31 17h38v13c0 10.5-8.5 19-19 19s-19-8.5-19-19z' fill='%23ffffff'/%3E%3Cpath d='M32.4 27h35.2v3c0 10.5-8.5 19-17.6 19s-17.6-8.5-17.6-19z' fill='%23E8A0AF'/%3E%3Cpath d='M48 49h4v26h-4z' fill='%23ffffff'/%3E%3Crect x='33' y='75' width='34' height='5.5' rx='2.75' fill='%23ffffff'/%3E%3C/svg%3E") no-repeat center/contain;
+    }
     #pinScreen .t { font-size:22px; font-weight:700; letter-spacing:-.3px; }
     #pinInput {
       width:190px; text-align:center; font-size:30px; letter-spacing:14px; text-indent:14px;
@@ -199,8 +217,8 @@
 <body>
 
   <div id="pinScreen">
-    <div class="glass">🍷</div>
-    <div class="t">우리집 와인</div>
+    <div class="glass"></div>
+    <div class="t">와인 딸까 말까</div>
     <input id="pinInput" inputmode="numeric" maxlength="4" placeholder="PIN 4자리">
     <button id="pinBtn" onclick="submitPin()">열기</button>
     <div id="pinErr"></div>
