@@ -1,12 +1,17 @@
 /**
  * 와인리스트 모바일 웹앱 백엔드
- * "와인리스트" 스프레드시트에 바인딩된 Apps Script 프로젝트에 붙여넣으세요.
- * (스프레드시트 열기 → 확장 프로그램 → Apps Script)
+ *
+ * 두 가지 방식 모두 지원합니다.
+ *  A) 시트에 붙는 방식 — 스프레드시트 → 확장 프로그램 → Apps Script
+ *  B) 따로 만드는 방식 — script.google.com → 새 프로젝트
+ *     (이 경우 스크립트 속성에 SHEET_ID를 넣어주면 됩니다. 시트 주소창의
+ *      docs.google.com/spreadsheets/d/[여기가 SHEET_ID]/edit 부분)
  *
  * 최초 1회 설정:
- * 1) 프로젝트 설정 → 스크립트 속성에 아래 두 개 추가
+ * 1) 프로젝트 설정 → 스크립트 속성에 추가
  *    - WINE_PIN         : 나와 아내가 같이 쓸 4자리 PIN (예: 1234)
  *    - GEMINI_API_KEY   : Gemini API 무료 키 (https://aistudio.google.com/apikey 에서 발급)
+ *    - SHEET_ID         : (B 방식일 때만) 와인리스트 스프레드시트 ID
  * 2) 이 파일의 setupColumns 함수를 에디터에서 한 번 실행 (시트에 새 컬럼 헤더 추가)
  */
 
@@ -33,8 +38,23 @@ function doGet() {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+/**
+ * 스프레드시트 가져오기.
+ * SHEET_ID 속성이 있으면 그걸로 열고(따로 만든 프로젝트), 없으면 붙어 있는 시트를 쓴다.
+ */
+function getSS_() {
+  var id = prop_('SHEET_ID');
+  if (id) return SpreadsheetApp.openById(id);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error('시트를 찾을 수 없어요. 프로젝트 설정 → 스크립트 속성에 SHEET_ID를 추가해주세요.');
+  }
+  return ss;
+}
+
 function getSheet_() {
-  return SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  return getSS_().getSheets()[0];
 }
 
 function getHeaders_() {
