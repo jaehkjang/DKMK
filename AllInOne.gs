@@ -48,6 +48,7 @@ function setupColumns() {
 }
 
 function doGet(e) {
+  ensureSetup_();
   var raw = INDEX_HTML;
 
   // 주소에 ?k=PIN 이 붙어 있으면 잠금 화면을 건너뛴다.
@@ -145,8 +146,27 @@ function checkSetup() {
   return out;
 }
 
-/** 최초 1회 실행: 컬럼 추가 + 아이콘 등록을 한 번에 */
+/**
+ * 첫 접속 때 컬럼 추가와 아이콘 등록을 알아서 끝낸다.
+ * 배포할 때 이미 권한을 받아두므로, 사용자가 setup을 따로 실행할 필요가 없다.
+ * 한 번 성공하면 SETUP_DONE 표시가 남아 다시 돌지 않는다.
+ */
+function ensureSetup_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('SETUP_DONE') === '1') return;
+  try {
+    setupColumns();
+    setupIcon();
+    props.setProperty('SETUP_DONE', '1');
+  } catch (err) {
+    // 설정이 실패해도 앱은 뜨게 둔다. 원인은 checkSetup으로 확인.
+    Logger.log('자동 설정 실패: ' + err.message);
+  }
+}
+
+/** 수동으로 다시 설정하고 싶을 때 (자동 설정이 실패했을 때 등) */
 function setup() {
+  PropertiesService.getScriptProperties().deleteProperty('SETUP_DONE');
   setupColumns();
   var iconUrl = setupIcon();
   Logger.log('설정 완료. 아이콘 주소: ' + iconUrl);
@@ -669,7 +689,7 @@ var INDEX_HTML = `<!DOCTYPE html>
     /* 결과가 접히지 않도록 미리보기는 썸네일 높이로 제한 */
     #photoPreview img { width:100%; max-height:150px; object-fit:cover; border-radius:14px; margin-bottom:12px; display:block; }
     .note { font-size:13px; padding:11px 13px; border-radius:11px; background:var(--wine-soft); color:#6E1729; margin-bottom:12px; line-height:1.5; }
-    .btn-copy { margin-top:9px; margin-right:6px; border:none; background:var(--wine); color:#fff; font-size:12.5px; font-weight:700; padding:8px 14px; border-radius:9px; }
+    .btn-copy { display:inline-block; margin-right:6px; margin-bottom:6px; border:none; background:var(--wine); color:#fff; font-size:12.5px; font-weight:700; padding:9px 15px; border-radius:9px; text-decoration:none; }
     .btn-copy.ghost { background:transparent; color:var(--wine); border:1px solid var(--wine); }
     .note.warn { background:#FFF3E0; color:#8A5A00; }
 
@@ -932,10 +952,15 @@ var INDEX_HTML = `<!DOCTYPE html>
         if (!url) return;
         var full = url + '?k=' + encodeURIComponent(pin);
         var box = document.getElementById('bookmarkTip');
-        box.innerHTML = '<div class="note">🔑 이 주소로 홈 화면에 추가하면 다음부터 PIN을 안 쳐도 돼요' +
-          '<div style="margin-top:8px;word-break:break-all;font-size:11.5px;opacity:.8">' + esc(full) + '</div>' +
-          '<button type="button" class="btn-copy" onclick="copyTip(this)" data-url="' + esc(full) + '">주소 복사</button>' +
-          '<button type="button" class="btn-copy ghost" onclick="document.getElementById(\\'bookmarkTip\\').innerHTML=\\'\\'">닫기</button></div>';
+        // target="_top"으로 바깥 창째로 이동시킨다. 그래야 주소창이 ?k= 주소로 바뀌고,
+        // 그 상태에서 홈 화면에 추가하면 바로가기가 열쇠를 그대로 물고 간다.
+        box.innerHTML = '<div class="note">🔑 <b>다음부터 PIN 안 치려면</b><br>' +
+          '아래 버튼을 누른 뒤, 그 화면에서 홈 화면에 추가하세요' +
+          '<div style="margin-top:9px">' +
+          '<a class="btn-copy" href="' + esc(full) + '" target="_top">이 주소로 열기</a>' +
+          '<button type="button" class="btn-copy ghost" onclick="copyTip(this)" data-url="' + esc(full) + '">주소 복사</button>' +
+          '<button type="button" class="btn-copy ghost" onclick="document.getElementById(\\'bookmarkTip\\').innerHTML=\\'\\'">닫기</button>' +
+          '</div></div>';
       }).withFailureHandler(function () { /* 주소를 못 얻으면 안내를 건너뛴다 */ }).getAppUrl();
     }
     function copyTip(btn) {
