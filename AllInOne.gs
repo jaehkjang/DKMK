@@ -47,8 +47,19 @@ function setupColumns() {
   });
 }
 
-function doGet() {
-  var out = HtmlService.createHtmlOutput(INDEX_HTML)
+function doGet(e) {
+  var raw = INDEX_HTML;
+
+  // 주소에 ?k=PIN 이 붙어 있으면 잠금 화면을 건너뛴다.
+  // Apps Script는 화면을 매번 다른 googleusercontent 주소로 서빙해서 브라우저
+  // 저장소가 남지 않는다. 그래서 "로그인 기억"은 주소가 담당한다.
+  var pin = prop_('WINE_PIN');
+  var key = (e && e.parameter) ? e.parameter.k : '';
+  if (pin && key && String(key) === String(pin)) {
+    raw = raw.replace('/*UNLOCKED*/false', 'true');
+  }
+
+  var out = HtmlService.createHtmlOutput(raw)
     .setTitle(APP_TITLE)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -58,6 +69,15 @@ function doGet() {
   var icon = prop_('ICON_URL');
   if (icon) out.setFaviconUrl(icon);
   return out;
+}
+
+/** 배포된 웹 앱 주소 (홈 화면 추가 안내용) */
+function getAppUrl() {
+  try {
+    return ScriptApp.getService().getUrl();
+  } catch (err) {
+    return '';
+  }
 }
 
 /**
@@ -76,9 +96,53 @@ function setupIcon() {
   var file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-  var url = 'https://lh3.googleusercontent.com/d/' + file.getId();
+  var url = 'https://lh3.googleusercontent.com/d/' + file.getId() + '=s512';
   PropertiesService.getScriptProperties().setProperty('ICON_URL', url);
   return url;
+}
+
+/**
+ * 설정이 제대로 됐는지 점검한다. 에디터에서 실행하고 실행 로그를 보면 된다.
+ * 아이콘이 안 바뀔 때 어디가 문제인지 확인하는 용도.
+ */
+function checkSetup() {
+  var lines = [];
+  var pin = prop_('WINE_PIN');
+  var sheetId = prop_('SHEET_ID');
+  var gem = prop_('GEMINI_API_KEY');
+  var icon = prop_('ICON_URL');
+
+  lines.push('WINE_PIN        : ' + (pin ? '설정됨 (' + String(pin).length + '자리)' : '❌ 없음'));
+  lines.push('GEMINI_API_KEY  : ' + (gem ? '설정됨' : '없음 (사진 인식/AI 추천만 못 씀)'));
+  lines.push('SHEET_ID        : ' + (sheetId ? sheetId : '없음 (시트에 붙인 방식이면 정상)'));
+
+  try {
+    var sheet = getSheet_();
+    lines.push('시트 연결       : OK — "' + sheet.getName() + '", ' + (sheet.getLastRow() - 1) + '행');
+    var headers = getHeaders_();
+    var missing = NEW_COLUMNS.filter(function (c) { return headers.indexOf(c) === -1; });
+    lines.push('신규 컬럼       : ' + (missing.length ? '❌ 없음 → ' + missing.join(', ') + ' (setup 실행 필요)' : 'OK'));
+  } catch (err) {
+    lines.push('시트 연결       : ❌ ' + err.message);
+  }
+
+  lines.push('ICON_URL        : ' + (icon ? icon : '❌ 없음 → setup(또는 setupIcon) 실행 필요'));
+  if (icon) {
+    try {
+      var resp = UrlFetchApp.fetch(icon, { muteHttpExceptions: true, followRedirects: true });
+      var code = resp.getResponseCode();
+      var type = resp.getHeaders()['Content-Type'] || resp.getHeaders()['content-type'] || '?';
+      lines.push('아이콘 접근     : ' + (code === 200 ? 'OK' : '❌') + ' HTTP ' + code + ' / ' + type);
+      if (code !== 200) lines.push('  → 드라이브 공유 설정 문제일 수 있습니다. setupIcon을 다시 실행해보세요.');
+    } catch (err) {
+      lines.push('아이콘 접근     : ❌ ' + err.message);
+    }
+  }
+
+  lines.push('웹 앱 주소      : ' + (getAppUrl() || '아직 배포 안 됨'));
+  var out = lines.join('\n');
+  Logger.log(out);
+  return out;
 }
 
 /** 최초 1회 실행: 컬럼 추가 + 아이콘 등록을 한 번에 */
@@ -605,6 +669,8 @@ var INDEX_HTML = `<!DOCTYPE html>
     /* 결과가 접히지 않도록 미리보기는 썸네일 높이로 제한 */
     #photoPreview img { width:100%; max-height:150px; object-fit:cover; border-radius:14px; margin-bottom:12px; display:block; }
     .note { font-size:13px; padding:11px 13px; border-radius:11px; background:var(--wine-soft); color:#6E1729; margin-bottom:12px; line-height:1.5; }
+    .btn-copy { margin-top:9px; margin-right:6px; border:none; background:var(--wine); color:#fff; font-size:12.5px; font-weight:700; padding:8px 14px; border-radius:9px; }
+    .btn-copy.ghost { background:transparent; color:var(--wine); border:1px solid var(--wine); }
     .note.warn { background:#FFF3E0; color:#8A5A00; }
 
     /* 셀러 인식 결과 */
@@ -675,6 +741,7 @@ var INDEX_HTML = `<!DOCTYPE html>
       <h1 id="pgTitle">셀러</h1>
       <span class="count" id="pgCount"></span>
     </div>
+    <div id="bookmarkTip"></div>
   </header>
 
   <main>
@@ -829,20 +896,62 @@ var INDEX_HTML = `<!DOCTYPE html>
       return s;
     }
 
-    /* ---------- 잠금 ---------- */
+    /* ---------- 잠금 ----------
+     * 주소에 ?k=PIN 이 붙어 있으면 서버가 이 값을 true로 바꿔서 내려준다.
+     * Apps Script는 화면을 매번 다른 googleusercontent 주소의 iframe으로 서빙해서
+     * localStorage가 남지 않는다. 그래서 "기억"은 주소 자체가 담당한다.
+     */
+    var PRE_UNLOCKED = /*UNLOCKED*/false;
+
+    function rememberUnlock() {
+      try { localStorage.setItem('wine_unlocked', '1'); } catch (e) {}
+    }
+    function isUnlocked() {
+      if (PRE_UNLOCKED) return true;
+      try { return localStorage.getItem('wine_unlocked') === '1'; } catch (e) { return false; }
+    }
+
     function submitPin() {
+      var pin = document.getElementById('pinInput').value;
       google.script.run.withSuccessHandler(function (ok) {
         if (ok) {
-          localStorage.setItem('wine_unlocked', '1');
+          rememberUnlock();
           document.getElementById('pinScreen').style.display = 'none';
+          showBookmarkTip(pin);
           load();
         } else {
           document.getElementById('pinErr').textContent = 'PIN이 맞지 않아요';
           document.getElementById('pinInput').value = '';
         }
-      }).checkPin(document.getElementById('pinInput').value);
+      }).checkPin(pin);
     }
-    if (localStorage.getItem('wine_unlocked') === '1') document.getElementById('pinScreen').style.display = 'none';
+
+    /** PIN을 매번 안 치려면 ?k=PIN 주소로 홈 화면에 추가하라고 한 번 안내 */
+    function showBookmarkTip(pin) {
+      google.script.run.withSuccessHandler(function (url) {
+        if (!url) return;
+        var full = url + '?k=' + encodeURIComponent(pin);
+        var box = document.getElementById('bookmarkTip');
+        box.innerHTML = '<div class="note">🔑 이 주소로 홈 화면에 추가하면 다음부터 PIN을 안 쳐도 돼요' +
+          '<div style="margin-top:8px;word-break:break-all;font-size:11.5px;opacity:.8">' + esc(full) + '</div>' +
+          '<button type="button" class="btn-copy" onclick="copyTip(this)" data-url="' + esc(full) + '">주소 복사</button>' +
+          '<button type="button" class="btn-copy ghost" onclick="document.getElementById(\\'bookmarkTip\\').innerHTML=\\'\\'">닫기</button></div>';
+      }).withFailureHandler(function () { /* 주소를 못 얻으면 안내를 건너뛴다 */ }).getAppUrl();
+    }
+    function copyTip(btn) {
+      var url = btn.dataset.url;
+      var done = function () { btn.textContent = '복사됨 ✓'; };
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, function () { fallbackCopy(url, done); });
+      else fallbackCopy(url, done);
+    }
+    function fallbackCopy(text, done) {
+      var t = document.createElement('textarea');
+      t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      document.body.removeChild(t);
+    }
+
+    if (isUnlocked()) document.getElementById('pinScreen').style.display = 'none';
 
     /* ---------- 화면 전환 ---------- */
     var TITLES = { Cellar:'셀러', Food:'추천', Add:'와인 추가', Stat:'기록' };
@@ -1211,7 +1320,7 @@ var INDEX_HTML = `<!DOCTYPE html>
 
     renderTypeChips();
     renderQuickFoods();
-    if (localStorage.getItem('wine_unlocked') === '1') load();
+    if (isUnlocked()) load();
   </script>
 </body>
 </html>

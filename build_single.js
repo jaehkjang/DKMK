@@ -22,8 +22,8 @@ function escapeForTemplateLiteral(s) {
 const code = fs.readFileSync(path.join(DIR, 'Code.gs'), 'utf8');
 const html = fs.readFileSync(path.join(DIR, 'Index.html'), 'utf8');
 
-const FROM = "HtmlService.createHtmlOutputFromFile('Index')";
-const TO = 'HtmlService.createHtmlOutput(INDEX_HTML)';
+const FROM = "HtmlService.createHtmlOutputFromFile('Index').getContent()";
+const TO = 'INDEX_HTML';
 if (code.indexOf(FROM) === -1) {
   throw new Error('Code.gs에서 ' + FROM + ' 를 찾지 못했습니다. doGet이 바뀌었는지 확인하세요.');
 }

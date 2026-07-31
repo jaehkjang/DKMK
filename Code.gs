@@ -38,8 +38,19 @@ function setupColumns() {
   });
 }
 
-function doGet() {
-  var out = HtmlService.createHtmlOutputFromFile('Index')
+function doGet(e) {
+  var raw = HtmlService.createHtmlOutputFromFile('Index').getContent();
+
+  // 주소에 ?k=PIN 이 붙어 있으면 잠금 화면을 건너뛴다.
+  // Apps Script는 화면을 매번 다른 googleusercontent 주소로 서빙해서 브라우저
+  // 저장소가 남지 않는다. 그래서 "로그인 기억"은 주소가 담당한다.
+  var pin = prop_('WINE_PIN');
+  var key = (e && e.parameter) ? e.parameter.k : '';
+  if (pin && key && String(key) === String(pin)) {
+    raw = raw.replace('/*UNLOCKED*/false', 'true');
+  }
+
+  var out = HtmlService.createHtmlOutput(raw)
     .setTitle(APP_TITLE)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -49,6 +60,15 @@ function doGet() {
   var icon = prop_('ICON_URL');
   if (icon) out.setFaviconUrl(icon);
   return out;
+}
+
+/** 배포된 웹 앱 주소 (홈 화면 추가 안내용) */
+function getAppUrl() {
+  try {
+    return ScriptApp.getService().getUrl();
+  } catch (err) {
+    return '';
+  }
 }
 
 /**
@@ -67,9 +87,53 @@ function setupIcon() {
   var file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-  var url = 'https://lh3.googleusercontent.com/d/' + file.getId();
+  var url = 'https://lh3.googleusercontent.com/d/' + file.getId() + '=s512';
   PropertiesService.getScriptProperties().setProperty('ICON_URL', url);
   return url;
+}
+
+/**
+ * 설정이 제대로 됐는지 점검한다. 에디터에서 실행하고 실행 로그를 보면 된다.
+ * 아이콘이 안 바뀔 때 어디가 문제인지 확인하는 용도.
+ */
+function checkSetup() {
+  var lines = [];
+  var pin = prop_('WINE_PIN');
+  var sheetId = prop_('SHEET_ID');
+  var gem = prop_('GEMINI_API_KEY');
+  var icon = prop_('ICON_URL');
+
+  lines.push('WINE_PIN        : ' + (pin ? '설정됨 (' + String(pin).length + '자리)' : '❌ 없음'));
+  lines.push('GEMINI_API_KEY  : ' + (gem ? '설정됨' : '없음 (사진 인식/AI 추천만 못 씀)'));
+  lines.push('SHEET_ID        : ' + (sheetId ? sheetId : '없음 (시트에 붙인 방식이면 정상)'));
+
+  try {
+    var sheet = getSheet_();
+    lines.push('시트 연결       : OK — "' + sheet.getName() + '", ' + (sheet.getLastRow() - 1) + '행');
+    var headers = getHeaders_();
+    var missing = NEW_COLUMNS.filter(function (c) { return headers.indexOf(c) === -1; });
+    lines.push('신규 컬럼       : ' + (missing.length ? '❌ 없음 → ' + missing.join(', ') + ' (setup 실행 필요)' : 'OK'));
+  } catch (err) {
+    lines.push('시트 연결       : ❌ ' + err.message);
+  }
+
+  lines.push('ICON_URL        : ' + (icon ? icon : '❌ 없음 → setup(또는 setupIcon) 실행 필요'));
+  if (icon) {
+    try {
+      var resp = UrlFetchApp.fetch(icon, { muteHttpExceptions: true, followRedirects: true });
+      var code = resp.getResponseCode();
+      var type = resp.getHeaders()['Content-Type'] || resp.getHeaders()['content-type'] || '?';
+      lines.push('아이콘 접근     : ' + (code === 200 ? 'OK' : '❌') + ' HTTP ' + code + ' / ' + type);
+      if (code !== 200) lines.push('  → 드라이브 공유 설정 문제일 수 있습니다. setupIcon을 다시 실행해보세요.');
+    } catch (err) {
+      lines.push('아이콘 접근     : ❌ ' + err.message);
+    }
+  }
+
+  lines.push('웹 앱 주소      : ' + (getAppUrl() || '아직 배포 안 됨'));
+  var out = lines.join('\n');
+  Logger.log(out);
+  return out;
 }
 
 /** 최초 1회 실행: 컬럼 추가 + 아이콘 등록을 한 번에 */
