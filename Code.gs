@@ -39,6 +39,7 @@ function setupColumns() {
 }
 
 function doGet(e) {
+  ensureSetup_();
   var raw = HtmlService.createHtmlOutputFromFile('Index').getContent();
 
   // 주소에 ?k=PIN 이 붙어 있으면 잠금 화면을 건너뛴다.
@@ -136,8 +137,27 @@ function checkSetup() {
   return out;
 }
 
-/** 최초 1회 실행: 컬럼 추가 + 아이콘 등록을 한 번에 */
+/**
+ * 첫 접속 때 컬럼 추가와 아이콘 등록을 알아서 끝낸다.
+ * 배포할 때 이미 권한을 받아두므로, 사용자가 setup을 따로 실행할 필요가 없다.
+ * 한 번 성공하면 SETUP_DONE 표시가 남아 다시 돌지 않는다.
+ */
+function ensureSetup_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('SETUP_DONE') === '1') return;
+  try {
+    setupColumns();
+    setupIcon();
+    props.setProperty('SETUP_DONE', '1');
+  } catch (err) {
+    // 설정이 실패해도 앱은 뜨게 둔다. 원인은 checkSetup으로 확인.
+    Logger.log('자동 설정 실패: ' + err.message);
+  }
+}
+
+/** 수동으로 다시 설정하고 싶을 때 (자동 설정이 실패했을 때 등) */
 function setup() {
+  PropertiesService.getScriptProperties().deleteProperty('SETUP_DONE');
   setupColumns();
   var iconUrl = setupIcon();
   Logger.log('설정 완료. 아이콘 주소: ' + iconUrl);
