@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { --bg:#111318; --card:#1c1f28; --line:#2a2e3a; --tx:#eef0f4; --sub:#8b93a3; --g:#37c977; --r:#ff5d5d; --a:#4f8cff; --y:#f2c14e; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--tx); max-width:480px; margin:0 auto; padding-bottom:70px; min-height:100vh; }
+    header { position:sticky; top:0; background:var(--bg); padding:14px 16px 8px; z-index:5; border-bottom:1px solid var(--line); }
+    h1 { font-size:18px; margin:0 0 4px; }
+    .sub { font-size:12px; color:var(--sub); }
+    main { padding:12px 16px 0; }
+    .page { display:none; }
+    .page.on { display:block; }
+
+    /* PIN 화면 */
+    #pinScreen { position:fixed; inset:0; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; z-index:50; }
+    #pinScreen h2 { font-size:20px; }
+    #pinInput { width:180px; text-align:center; font-size:24px; letter-spacing:8px; padding:12px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--tx); }
+    #pinBtn { padding:10px 30px; border-radius:12px; border:none; background:var(--a); color:#fff; font-size:15px; font-weight:700; }
+    #pinErr { color:var(--r); font-size:13px; height:16px; }
+
+    /* 하단 탭바 */
+    nav.tabbar { position:fixed; bottom:0; left:50%; transform:translateX(-50%); width:100%; max-width:480px; display:flex; background:var(--card); border-top:1px solid var(--line); z-index:6; }
+    nav.tabbar div { flex:1; text-align:center; padding:10px 0 8px; font-size:11px; color:var(--sub); }
+    nav.tabbar div .ic { font-size:19px; display:block; margin-bottom:2px; }
+    nav.tabbar div.on { color:var(--a); }
+
+    .filters { display:flex; gap:6px; margin-bottom:8px; overflow-x:auto; }
+    .chip { padding:6px 12px; border-radius:20px; background:var(--card); border:1px solid var(--line); color:var(--sub); font-size:13px; white-space:nowrap; }
+    .chip.on { background:var(--g); color:#06210f; border-color:var(--g); }
+    #search { margin-bottom:10px; width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--tx); font-size:14px; }
+
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:10px; }
+    .card .top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+    .card .name { font-size:15px; font-weight:600; }
+    .badge { font-size:11px; padding:3px 8px; border-radius:20px; white-space:nowrap; }
+    .badge.own { background:rgba(55,201,119,.15); color:var(--g); }
+    .badge.drunk { background:rgba(139,147,163,.15); color:var(--sub); }
+    .meta { color:var(--sub); font-size:12.5px; margin-top:4px; line-height:1.5; }
+    .pairing { font-size:12.5px; margin-top:6px; opacity:.85; }
+    .stars { color:var(--y); font-size:13px; margin-top:4px; }
+    .row-btns { display:flex; gap:8px; margin-top:10px; }
+    .btn { flex:1; padding:9px 0; border-radius:10px; border:none; font-size:13.5px; font-weight:600; }
+    .btn.drink { background:var(--g); color:#06210f; }
+    .btn.undo { background:transparent; border:1px solid var(--line); color:var(--sub); }
+    .btn.primary { background:var(--a); color:#fff; }
+    .btn.wide { width:100%; }
+    .empty { text-align:center; color:var(--sub); padding:40px 0; font-size:13.5px; }
+    .hint { font-size:12px; color:var(--a); margin-top:8px; padding:8px 10px; background:rgba(79,140,255,.1); border-radius:8px; }
+    .loading { text-align:center; color:var(--sub); padding:30px 0; font-size:13px; }
+
+    form.formcard { padding:0; display:flex; flex-direction:column; gap:10px; }
+    label { font-size:12.5px; color:var(--sub); margin-bottom:-4px; }
+    input, textarea, select { width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--tx); font-size:14px; font-family:inherit; }
+    textarea { resize:vertical; min-height:44px; }
+
+    .photobox { border:1px dashed var(--line); border-radius:14px; padding:16px; text-align:center; margin-bottom:12px; }
+    .photobox img { max-width:100%; border-radius:10px; margin-top:10px; }
+    .photobox input[type=file] { display:none; }
+    .photobox label.take { display:inline-block; padding:10px 18px; border-radius:10px; background:var(--a); color:#fff; font-weight:700; font-size:14px; }
+
+    /* 모달 */
+    .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:flex-end; z-index:40; }
+    .modal-bg.on { display:flex; }
+    .modal { background:var(--card); width:100%; max-width:480px; margin:0 auto; border-radius:18px 18px 0 0; padding:18px 16px 26px; max-height:85vh; overflow-y:auto; }
+    .modal h3 { margin:0 0 12px; font-size:16px; }
+    .star-pick { display:flex; gap:6px; font-size:26px; margin:6px 0 12px; }
+    .star-pick span { cursor:pointer; color:var(--line); }
+    .star-pick span.on { color:var(--y); }
+    .close-x { position:absolute; top:14px; right:16px; color:var(--sub); font-size:15px; }
+
+    #toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#000; color:#fff; padding:10px 18px; border-radius:20px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90%; text-align:center; z-index:60; }
+    #toast.show { opacity:.92; }
+
+    .stat-row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
+    .stat-row:last-child { border-bottom:none; }
+    .stat-title { font-size:13px; color:var(--sub); margin:16px 0 6px; }
+    .bar-wrap { flex:1; margin:0 10px; background:var(--line); border-radius:6px; height:8px; align-self:center; overflow:hidden; }
+    .bar { height:100%; background:var(--a); }
+  </style>
+</head>
+<body>
+
+  <div id="pinScreen">
+    <h2>🍷 와인리스트</h2>
+    <input id="pinInput" inputmode="numeric" maxlength="4" placeholder="PIN">
+    <button id="pinBtn" onclick="submitPin()">입장</button>
+    <div id="pinErr"></div>
+  </div>
+
+  <header>
+    <h1>🍷 와인리스트</h1>
+    <div class="sub" id="headerSub">우리집 셀러</div>
+  </header>
+
+  <main>
+    <!-- 목록 -->
+    <div id="pgHome" class="page on">
+      <div class="filters" id="statusFilters">
+        <div class="chip on" data-v="보유" onclick="setFilter('보유')">보유</div>
+        <div class="chip" data-v="all" onclick="setFilter('all')">전체</div>
+      </div>
+      <input id="search" placeholder="와인명·품종·종류 검색" oninput="renderList()">
+      <div id="listArea"><div class="loading">불러오는 중…</div></div>
+    </div>
+
+    <!-- 추가 -->
+    <div id="pgAdd" class="page">
+      <div class="photobox">
+        <div id="photoPreview"></div>
+        <label class="take" for="photoInput">📷 라벨 사진 찍기</label>
+        <input type="file" id="photoInput" accept="image/*" capture="environment" onchange="onPhotoSelected(event)">
+        <div class="hint" id="photoHint" style="display:none"></div>
+      </div>
+      <form class="formcard" onsubmit="submitAdd(event)">
+        <label>와인명 *</label>
+        <input id="f_와인명" required>
+        <label>종류</label>
+        <input id="f_종류" oninput="checkSimilar()">
+        <label>품종</label>
+        <input id="f_품종" oninput="checkSimilar()">
+        <div id="similarHint"></div>
+        <label>생산지/국가</label>
+        <input id="f_생산지/국가">
+        <label>빈티지</label>
+        <input id="f_빈티지">
+        <label>평균가격(국내·원)</label>
+        <input id="f_평균가격(국내·원)">
+        <label>평균가격(글로벌·USD)</label>
+        <input id="f_평균가격(글로벌·USD)">
+        <label>추천 페어링</label>
+        <textarea id="f_추천 페어링"></textarea>
+        <label>어울리는잔</label>
+        <input id="f_어울리는잔">
+        <label>서빙방법</label>
+        <input id="f_서빙방법">
+        <label>와인배경</label>
+        <textarea id="f_와인배경"></textarea>
+        <label>메모</label>
+        <textarea id="f_메모"></textarea>
+        <button id="addBtn" class="btn primary wide" type="submit" style="margin-top:6px;">추가하기</button>
+      </form>
+    </div>
+
+    <!-- 마심 보관함 -->
+    <div id="pgDrunk" class="page">
+      <input id="searchDrunk" placeholder="와인명·품종·종류 검색" oninput="renderDrunkList()">
+      <div id="drunkArea"><div class="loading">불러오는 중…</div></div>
+    </div>
+
+    <!-- 요리 추천 -->
+    <div id="pgFood" class="page">
+      <label style="font-size:12.5px;color:var(--sub);">오늘 뭐 먹어요?</label>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <input id="foodInput" placeholder="예: 삼겹살, 크림파스타…">
+        <button class="btn primary" style="flex:0 0 70px;" onclick="doRecommend()">추천</button>
+      </div>
+      <div id="foodArea" style="margin-top:14px;"></div>
+    </div>
+
+    <!-- 통계 -->
+    <div id="pgStat" class="page">
+      <div id="statArea"><div class="loading">불러오는 중…</div></div>
+    </div>
+  </main>
+
+  <nav class="tabbar" id="tabbar">
+    <div class="tab on" data-p="Home" onclick="showPage('Home')"><span class="ic">🏠</span>보유</div>
+    <div class="tab" data-p="Add" onclick="showPage('Add')"><span class="ic">➕</span>추가</div>
+    <div class="tab" data-p="Drunk" onclick="showPage('Drunk')"><span class="ic">🍷</span>마심</div>
+    <div class="tab" data-p="Food" onclick="showPage('Food')"><span class="ic">🍽️</span>추천</div>
+    <div class="tab" data-p="Stat" onclick="showPage('Stat')"><span class="ic">📊</span>통계</div>
+  </nav>
+
+  <!-- 상세 모달 -->
+  <div class="modal-bg" id="detailModal" onclick="if(event.target===this) cm('detailModal')">
+    <div class="modal" style="position:relative;">
+      <span class="close-x" onclick="cm('detailModal')">닫기 ✕</span>
+      <div id="detailBody"></div>
+    </div>
+  </div>
+
+  <!-- 마시기 모달 -->
+  <div class="modal-bg" id="drinkModal" onclick="if(event.target===this) cm('drinkModal')">
+    <div class="modal" style="position:relative;">
+      <span class="close-x" onclick="cm('drinkModal')">닫기 ✕</span>
+      <h3 id="drinkTitle">마셨어요 🍷</h3>
+      <label style="font-size:12.5px;color:var(--sub);">평점</label>
+      <div class="star-pick" id="starPick"></div>
+      <label style="font-size:12.5px;color:var(--sub);">한줄평</label>
+      <textarea id="drinkComment" placeholder="느낀 점을 남겨보세요"></textarea>
+      <label style="font-size:12.5px;color:var(--sub); margin-top:8px;">함께한 음식</label>
+      <input id="drinkFood" placeholder="예: 스테이크">
+      <button class="btn drink wide" style="margin-top:14px;" onclick="confirmDrink()">기록하기</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    var ALL_WINES = [];
+    var FILTER = '보유';
+    var CURRENT_PHOTO_DATAURL = null;
+    var CURRENT_RATING = 5;
+    var PENDING_ROW = null;
+
+    /* ---------- PIN ---------- */
+    function submitPin() {
+      var pin = document.getElementById('pinInput').value;
+      google.script.run.withSuccessHandler(function (ok) {
+        if (ok) {
+          localStorage.setItem('wine_unlocked', '1');
+          document.getElementById('pinScreen').style.display = 'none';
+          load();
+        } else {
+          document.getElementById('pinErr').textContent = 'PIN이 맞지 않아요';
+        }
+      }).checkPin(pin);
+    }
+    if (localStorage.getItem('wine_unlocked') === '1') {
+      document.getElementById('pinScreen').style.display = 'none';
+    }
+
+    /* ---------- 공통 ---------- */
+    function om(id) { document.getElementById(id).classList.add('on'); }
+    function cm(id) { document.getElementById(id).classList.remove('on'); }
+    function toast(msg) {
+      var t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(function () { t.classList.remove('show'); }, 1800);
+    }
+    function esc(s) { return (s === undefined || s === null) ? '' : String(s); }
+
+    function showPage(p) {
+      ['Home', 'Add', 'Drunk', 'Food', 'Stat'].forEach(function (name) {
+        document.getElementById('pg' + name).classList.toggle('on', name === p);
+      });
+      document.querySelectorAll('#tabbar .tab').forEach(function (t) {
+        t.classList.toggle('on', t.dataset.p === p);
+      });
+      if (p === 'Home' || p === 'Drunk') load();
+      if (p === 'Stat') loadStats();
+    }
+
+    function load() {
+      google.script.run.withSuccessHandler(function (data) {
+        ALL_WINES = data.wines;
+        renderList();
+        renderDrunkList();
+      }).withFailureHandler(function (e) {
+        document.getElementById('listArea').innerHTML = '<div class="empty">불러오기 실패: ' + e.message + '</div>';
+      }).getWines();
+    }
+
+    /* ---------- 목록(보유) ---------- */
+    function setFilter(v) {
+      FILTER = v;
+      document.querySelectorAll('#statusFilters .chip').forEach(function (c) {
+        c.classList.toggle('on', c.dataset.v === v);
+      });
+      renderList();
+    }
+
+    function renderList() {
+      var q = (document.getElementById('search').value || '').trim().toLowerCase();
+      var list = ALL_WINES.filter(function (w) {
+        if (FILTER !== 'all' && w['상태'] !== FILTER) return false;
+        if (!q) return true;
+        var hay = [w['와인명'], w['품종'], w['종류']].join(' ').toLowerCase();
+        return hay.indexOf(q) !== -1;
+      });
+      list.sort(function (a, b) { return (b['등록일'] || '').localeCompare(a['등록일'] || ''); });
+
+      var area = document.getElementById('listArea');
+      if (list.length === 0) { area.innerHTML = '<div class="empty">해당하는 와인이 없어요</div>'; return; }
+      area.innerHTML = list.map(function (w) { return cardHtml(w, false); }).join('');
+    }
+
+    function renderDrunkList() {
+      var q = (document.getElementById('searchDrunk').value || '').trim().toLowerCase();
+      var list = ALL_WINES.filter(function (w) {
+        if (w['상태'] !== '마심') return false;
+        if (!q) return true;
+        var hay = [w['와인명'], w['품종'], w['종류']].join(' ').toLowerCase();
+        return hay.indexOf(q) !== -1;
+      });
+      list.sort(function (a, b) { return (b['마신날짜'] || '').localeCompare(a['마신날짜'] || ''); });
+
+      var area = document.getElementById('drunkArea');
+      if (list.length === 0) { area.innerHTML = '<div class="empty">아직 마신 와인이 없어요</div>'; return; }
+      area.innerHTML = list.map(function (w) { return cardHtml(w, true); }).join('');
+    }
+
+    function starsHtml(n) {
+      n = parseInt(n, 10) || 0;
+      var s = '';
+      for (var i = 1; i <= 5; i++) s += (i <= n ? '★' : '☆');
+      return s;
+    }
+
+    function cardHtml(w, isDrunkTab) {
+      var isDrunk = w['상태'] === '마심';
+      var badge = isDrunk ? '<span class="badge drunk">마심 · ' + esc(w['마신날짜']) + '</span>' : '<span class="badge own">보유</span>';
+      var meta = [esc(w['종류']), esc(w['품종']), esc(w['생산지/국가']), esc(w['빈티지'])].filter(Boolean).join(' · ');
+      var pairing = w['추천 페어링'] ? '<div class="pairing">🍽 ' + esc(w['추천 페어링']) + '</div>' : '';
+      var stars = isDrunk && w['평점'] ? '<div class="stars">' + starsHtml(w['평점']) + '</div>' : '';
+      var btn = isDrunk
+        ? '<button class="btn undo" onclick="doUnmark(' + w.rowIndex + ')">되돌리기</button>'
+        : '<button class="btn drink" onclick="openDrinkModal(' + w.rowIndex + ', \\'' + esc(w['와인명']).replace(/'/g, "\\'") + '\\')">🍷 마셨어요</button>';
+      return '<div class="card" onclick="openDetail(' + w.rowIndex + ')">' +
+        '<div class="top"><div class="name">' + esc(w['와인명']) + '</div>' + badge + '</div>' +
+        '<div class="meta">' + meta + '</div>' + pairing + stars +
+        '<div class="row-btns" onclick="event.stopPropagation()">' + btn + '</div>' +
+        '</div>';
+    }
+
+    /* ---------- 상세 ---------- */
+    function openDetail(rowIndex) {
+      var w = ALL_WINES.find(function (x) { return x.rowIndex === rowIndex; });
+      if (!w) return;
+      var rows = [
+        ['종류', w['종류']], ['품종', w['품종']], ['생산지/국가', w['생산지/국가']], ['빈티지', w['빈티지']],
+        ['가격(국내)', w['평균가격(국내·원)']], ['가격(글로벌)', w['평균가격(글로벌·USD)']],
+        ['어울리는잔', w['어울리는잔']], ['서빙방법', w['서빙방법']],
+        ['추천 페어링', w['추천 페어링']], ['와인배경', w['와인배경']], ['메모', w['메모']]
+      ];
+      if (w['상태'] === '마심') {
+        rows.push(['마신날짜', w['마신날짜']]);
+        rows.push(['평점', starsHtml(w['평점'])]);
+        rows.push(['한줄평', w['한줄평']]);
+        rows.push(['함께한 음식', w['함께한음식']]);
+      }
+      var photo = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '" style="width:100%;border-radius:10px;margin-bottom:10px;">' : '';
+      var html = '<h3>' + esc(w['와인명']) + '</h3>' + photo +
+        rows.filter(function (r) { return r[1]; }).map(function (r) {
+          return '<div class="stat-row"><span style="color:var(--sub)">' + r[0] + '</span><span style="text-align:right;max-width:65%;">' + esc(r[1]) + '</span></div>';
+        }).join('');
+      document.getElementById('detailBody').innerHTML = html;
+      om('detailModal');
+    }
+
+    /* ---------- 마시기 ---------- */
+    function openDrinkModal(rowIndex, name) {
+      PENDING_ROW = rowIndex;
+      CURRENT_RATING = 5;
+      document.getElementById('drinkTitle').textContent = name + ' 🍷';
+      document.getElementById('drinkComment').value = '';
+      document.getElementById('drinkFood').value = '';
+      renderStars();
+      om('drinkModal');
+    }
+    function renderStars() {
+      var el = document.getElementById('starPick');
+      el.innerHTML = '';
+      for (var i = 1; i <= 5; i++) {
+        var span = document.createElement('span');
+        span.textContent = '★';
+        span.className = i <= CURRENT_RATING ? 'on' : '';
+        span.onclick = (function (v) { return function () { CURRENT_RATING = v; renderStars(); }; })(i);
+        el.appendChild(span);
+      }
+    }
+    function confirmDrink() {
+      var info = {
+        '평점': CURRENT_RATING,
+        '한줄평': document.getElementById('drinkComment').value,
+        '함께한음식': document.getElementById('drinkFood').value
+      };
+      google.script.run.withSuccessHandler(function () {
+        toast('마심으로 기록했어요');
+        cm('drinkModal');
+        load();
+      }).withFailureHandler(function (e) { toast('실패: ' + e.message); }).markDrunk(PENDING_ROW, info);
+    }
+    function doUnmark(rowIndex) {
+      google.script.run.withSuccessHandler(function () {
+        toast('보유 상태로 되돌렸어요');
+        load();
+      }).withFailureHandler(function (e) { toast('실패: ' + e.message); }).unmarkDrunk(rowIndex);
+    }
+
+    /* ---------- 추가 + 사진인식 ---------- */
+    function onPhotoSelected(e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        CURRENT_PHOTO_DATAURL = reader.result;
+        document.getElementById('photoPreview').innerHTML = '<img src="' + reader.result + '">';
+        var hint = document.getElementById('photoHint');
+        hint.style.display = 'block';
+        hint.textContent = 'AI가 라벨을 읽는 중…';
+        google.script.run.withSuccessHandler(function (guess) {
+          hint.textContent = '아래 항목에 자동으로 채웠어요 — 확인 후 수정해주세요';
+          if (guess['와인명']) document.getElementById('f_와인명').value = guess['와인명'];
+          if (guess['종류']) document.getElementById('f_종류').value = guess['종류'];
+          if (guess['품종']) document.getElementById('f_품종').value = guess['품종'];
+          if (guess['생산지_국가']) document.getElementById('f_생산지/국가').value = guess['생산지_국가'];
+          if (guess['빈티지']) document.getElementById('f_빈티지').value = guess['빈티지'];
+          checkSimilar();
+        }).withFailureHandler(function (err) {
+          hint.textContent = '자동 인식 실패 (직접 입력해주세요): ' + err.message;
+        }).recognizeLabel(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    var similarTimer = null;
+    function checkSimilar() {
+      clearTimeout(similarTimer);
+      var kw = document.getElementById('f_품종').value || document.getElementById('f_종류').value;
+      similarTimer = setTimeout(function () {
+        if (!kw || kw.trim().length < 2) { document.getElementById('similarHint').innerHTML = ''; return; }
+        google.script.run.withSuccessHandler(function (matches) {
+          var box = document.getElementById('similarHint');
+          if (!matches || matches.length === 0) { box.innerHTML = ''; return; }
+          box.innerHTML = '<div class="hint">이미 마셔본 비슷한 와인 ' + matches.length + '개: ' +
+            matches.map(function (m) { return esc(m['와인명']); }).join(', ') + '</div>';
+        }).getDrunkMatches(kw);
+      }, 400);
+    }
+
+    function submitAdd(e) {
+      e.preventDefault();
+      var fields = ['와인명', '종류', '품종', '생산지/국가', '빈티지', '평균가격(국내·원)', '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모'];
+      var data = {};
+      fields.forEach(function (f) { data[f] = document.getElementById('f_' + f).value; });
+      if (!data['와인명']) { toast('와인명을 입력해주세요'); return; }
+      var btn = document.getElementById('addBtn');
+      btn.disabled = true; btn.textContent = '추가하는 중…';
+      google.script.run.withSuccessHandler(function () {
+        toast('추가했어요');
+        document.querySelectorAll('#pgAdd input, #pgAdd textarea').forEach(function (el) { el.value = ''; });
+        document.getElementById('similarHint').innerHTML = '';
+        document.getElementById('photoPreview').innerHTML = '';
+        document.getElementById('photoHint').style.display = 'none';
+        CURRENT_PHOTO_DATAURL = null;
+        btn.disabled = false; btn.textContent = '추가하기';
+        showPage('Home');
+      }).withFailureHandler(function (e2) {
+        toast('실패: ' + e2.message);
+        btn.disabled = false; btn.textContent = '추가하기';
+      }).addWine(data, CURRENT_PHOTO_DATAURL);
+    }
+
+    /* ---------- 요리 추천 ---------- */
+    function doRecommend() {
+      var food = document.getElementById('foodInput').value.trim();
+      if (!food) return;
+      var area = document.getElementById('foodArea');
+      area.innerHTML = '<div class="loading">추천 중…</div>';
+      google.script.run.withSuccessHandler(function (wines) {
+        if (!wines || wines.length === 0) {
+          area.innerHTML = '<div class="empty">맞는 추천을 찾지 못했어요. 다른 키워드로 시도해보세요</div>';
+          return;
+        }
+        area.innerHTML = wines.map(function (w) { return cardHtml(w, false); }).join('');
+      }).withFailureHandler(function (e) { area.innerHTML = '<div class="empty">실패: ' + e.message + '</div>'; }).recommendByFood(food);
+    }
+
+    /* ---------- 통계 ---------- */
+    function loadStats() {
+      var area = document.getElementById('statArea');
+      area.innerHTML = '<div class="loading">불러오는 중…</div>';
+      google.script.run.withSuccessHandler(function (s) {
+        function section(title, obj) {
+          var entries = Object.keys(obj).map(function (k) { return [k, obj[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
+          var max = entries.reduce(function (m, e) { return Math.max(m, e[1]); }, 1);
+          return '<div class="stat-title">' + title + '</div>' + entries.map(function (e) {
+            return '<div class="stat-row"><span>' + e[0] + '</span><div class="bar-wrap"><div class="bar" style="width:' + (e[1] / max * 100) + '%"></div></div><span>' + e[1] + '</span></div>';
+          }).join('');
+        }
+        area.innerHTML = '<div class="card"><div class="name">총 마신 와인: ' + s.totalDrunk + '병</div></div>' +
+          section('월별', s.byMonth) + section('종류별', s.byType) + section('가격대별', s.byPrice);
+      }).withFailureHandler(function (e) { area.innerHTML = '<div class="empty">실패: ' + e.message + '</div>'; }).getStats();
+    }
+
+    if (localStorage.getItem('wine_unlocked') === '1') load();
+  </script>
+</body>
+</html>
