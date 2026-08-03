@@ -25,8 +25,10 @@ function typeStyle(t) {
 }
 
 /**
- * 음식 빠른 선택. 종류가 많은 카테고리(치킨/파스타/치즈)는 하위 메뉴로 세분화한다.
- * children이 없으면 눌렀을 때 바로 검색, 있으면 하위 칩을 펼친다.
+ * 음식 빠른 선택. 종류가 많은 카테고리는 하위 메뉴로 세분화한다.
+ * children이 없으면 그 자체가 바로 선택되는 음식이고, 있으면 하위 칩을 펼친다.
+ * 칩은 여러 개 골라도 되는 다중 선택이라(SELECTED_FOODS), 오늘 먹는 음식이 여럿이면
+ * 다 같이 어울리는 와인을 찾아준다.
  */
 var FOOD_MENU = [
   { label: '삼겹살' },
@@ -34,9 +36,15 @@ var FOOD_MENU = [
   { label: '회' },
   { label: '치킨', children: ['후라이드', '양념치킨', '간장치킨', '마늘치킨', '핫윙', '순살치킨'] },
   { label: '파스타', children: ['토마토파스타', '크림파스타', '오일파스타', '로제파스타', '봉골레파스타', '미트소스파스타'] },
-  { label: '치즈', children: ['브리치즈', '까망베르', '체다치즈', '블루치즈', '고다치즈', '파르미지아노'] }
+  { label: '치즈', children: ['브리치즈', '까망베르', '체다치즈', '블루치즈', '고다치즈', '파르미지아노'] },
+  { label: '중식', children: ['짜장면', '짬뽕', '탕수육', '마파두부', '깐풍기', '양장피'] },
+  { label: '분식·야식', children: ['떡볶이', '순대', '튀김', '김밥', '오뎅', '라면'] },
+  { label: '족발·보쌈', children: ['족발', '보쌈', '냉채족발', '매운족발'] },
+  { label: '한식 찜·탕', children: ['갈비찜', '찜닭', '감자탕', '삼계탕', '육개장', '설렁탕'] },
+  { label: '일식', children: ['초밥', '라멘', '우동', '돈카츠', '야키토리', '규동'] }
 ];
 var OPEN_FOOD_CAT = null;
+var SELECTED_FOODS = [];
 
 /* ---------- 헬퍼 ---------- */
 function om(id) { document.getElementById(id).classList.add('on'); }
@@ -219,6 +227,7 @@ function showPage(p) {
   document.getElementById('pgCount').textContent = '';
   if (p === 'Cellar') { load(); }
   if (p === 'Stat') loadStats();
+  if (p === 'Food') renderCellarPairingChips();
   window.scrollTo(0, 0);
 }
 
@@ -379,13 +388,28 @@ function renderTypeChips() {
     };
   });
 }
+/**
+ * 음식 칩은 여러 개 골라도 되는 다중 선택이다. 고를 때마다 선택된 것들을
+ * "·"로 이어 입력창에 채우고 바로 검색한다. 다시 누르면 선택 해제.
+ */
+function toggleFoodSelection(label) {
+  var i = SELECTED_FOODS.indexOf(label);
+  if (i === -1) SELECTED_FOODS.push(label); else SELECTED_FOODS.splice(i, 1);
+  document.getElementById('foodInput').value = SELECTED_FOODS.join('·');
+  renderQuickFoods();
+  renderCellarPairingChips();
+  if (SELECTED_FOODS.length) doRecommend();
+  else document.getElementById('foodArea').innerHTML = '';
+}
+
 function renderQuickFoods() {
   var el = document.getElementById('foodQuick');
   el.innerHTML = FOOD_MENU.map(function (item) {
     var hasKids = item.children && item.children.length;
     var isOpen = OPEN_FOOD_CAT === item.label;
+    var isSelected = !hasKids && SELECTED_FOODS.indexOf(item.label) !== -1;
     var arrow = hasKids ? (isOpen ? ' ▲' : ' ▼') : '';
-    return '<button type="button" class="' + (isOpen ? 'on' : '') + '" data-cat="' + esc(item.label) + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(item.label) + arrow + '</button>';
+    return '<button type="button" class="' + (isOpen || isSelected ? 'on' : '') + '" data-cat="' + esc(item.label) + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(item.label) + arrow + '</button>';
   }).join('');
   el.querySelectorAll('button').forEach(function (b) {
     var item = FOOD_MENU.filter(function (f) { return f.label === b.dataset.cat; })[0];
@@ -394,8 +418,7 @@ function renderQuickFoods() {
         OPEN_FOOD_CAT = (OPEN_FOOD_CAT === item.label) ? null : item.label;
         renderQuickFoods();
       } else {
-        document.getElementById('foodInput').value = item.label;
-        doRecommend();
+        toggleFoodSelection(item.label);
       }
     };
   });
@@ -404,10 +427,43 @@ function renderQuickFoods() {
   var open = FOOD_MENU.filter(function (f) { return f.label === OPEN_FOOD_CAT; })[0];
   if (!open) { sub.innerHTML = ''; return; }
   sub.innerHTML = open.children.map(function (c) {
-    return '<button type="button" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(c) + '</button>';
+    var isSelected = SELECTED_FOODS.indexOf(c) !== -1;
+    return '<button type="button" class="' + (isSelected ? 'on' : '') + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(c) + '</button>';
   }).join('');
   sub.querySelectorAll('button').forEach(function (b) {
-    b.onclick = function () { document.getElementById('foodInput').value = b.textContent; doRecommend(); };
+    b.onclick = function () { toggleFoodSelection(b.textContent); };
+  });
+}
+
+/**
+ * 셀러 와인들의 "추천 페어링" 문구에서 짧은 음식 키워드를 뽑아 퀵칩으로 함께 보여준다.
+ * FOOD_MENU(일반적인 음식 목록)와 우리 셀러에 실제로 적힌 페어링 정보를 섞어서 보여주는 것 —
+ * 이 칩을 고르면 그 문구가 그대로 검색어가 되니 항상 "페어링 정보에 있어요" 배지가 뜬다.
+ */
+function cellarPairingKeywords() {
+  var set = {};
+  ALL_WINES.forEach(function (w) {
+    var text = String(w['추천 페어링'] || '').replace(/베스트\s*:/g, '').replace(/한국\s*:/g, '');
+    text.split(/[·,\/]+/).forEach(function (part) {
+      var t = part.trim();
+      if (t && t.length <= 10 && !/[.!?]/.test(t)) set[t] = true;
+    });
+  });
+  return Object.keys(set).slice(0, 10);
+}
+function renderCellarPairingChips() {
+  var label = document.getElementById('foodCellarLabel');
+  var el = document.getElementById('foodCellarChips');
+  if (!label || !el) return;
+  var keywords = cellarPairingKeywords();
+  if (!keywords.length) { label.style.display = 'none'; el.innerHTML = ''; return; }
+  label.style.display = '';
+  el.innerHTML = keywords.map(function (k) {
+    var isSelected = SELECTED_FOODS.indexOf(k) !== -1;
+    return '<button type="button" class="' + (isSelected ? 'on' : '') + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(k) + '</button>';
+  }).join('');
+  el.querySelectorAll('button').forEach(function (b) {
+    b.onclick = function () { toggleFoodSelection(b.textContent); };
   });
 }
 function toggleMore() {
@@ -558,6 +614,12 @@ function submitAdd(e) {
 function doRecommend() {
   var food = document.getElementById('foodInput').value.trim();
   if (!food) { toast('뭘 드실지 적어주세요'); return; }
+  // 입력창을 손으로 고쳤으면(칩으로 고른 것과 달라졌으면) 칩 선택 표시를 지운다
+  if (food !== SELECTED_FOODS.join('·')) {
+    SELECTED_FOODS = [];
+    renderQuickFoods();
+    renderCellarPairingChips();
+  }
   var area = document.getElementById('foodArea');
   area.innerHTML = '<div class="loading">🍷 고르는 중…</div>';
   callAPI(function () { return API.recommendByFood(food); }).then(function (list) {
