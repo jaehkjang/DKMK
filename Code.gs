@@ -698,9 +698,10 @@ function getDrunkMatches(token, keyword) {
 
 /**
  * 음식 입력 → 보유 와인 중 추천.
- * AI가 실제 페어링 지식으로 순위와 이유를 정해준다(키워드가 안 겹쳐도 추천 가능).
+ * 각 와인의 "추천 페어링" 필드(셀러에 이미 적어둔 정보)를 최우선 근거로 삼고,
+ * 거기 없어도 품종/종류로 AI가 순위·이유를 정한다(키워드가 안 겹쳐도 추천 가능).
  * API 실패 시 키워드 매칭으로 자동 대체.
- * 반환: [{ wine, reason }]
+ * 반환: [{ wine, reason, matched }] — matched는 셀러 페어링 정보에 직접 근거했는지
  */
 function recommendByFood(token, food) {
   requireUser_(token);
@@ -710,6 +711,13 @@ function recommendByFood(token, food) {
   var owned = getWines(token).wines.filter(function (w) { return w['상태'] === '보유'; });
   if (!owned.length) return [];
 
+  // 셀러에 이미 적힌 페어링 문구와 글자가 직접 겹치는 와인 — 우리 데이터가 근거인 경우
+  var directIds = {};
+  owned.forEach(function (w) {
+    var text = String(w['추천 페어링'] || '');
+    if (text && food && text.indexOf(food) !== -1) directIds[w.rowIndex] = true;
+  });
+
   try {
     var menu = owned.map(function (w) {
       return {
@@ -718,17 +726,20 @@ function recommendByFood(token, food) {
         종류: w['종류'],
         품종: w['품종'],
         생산지: w['생산지/국가'],
-        기존페어링: w['추천 페어링']
+        기존페어링: w['추천 페어링'] || ''
       };
     });
 
-    var prompt = '너는 소믈리에다. 아래는 우리 집 와인 셀러에 지금 있는 와인 목록이다.\n' +
+    var prompt = '너는 소믈리에다. 아래는 우리 집 와인 셀러에 지금 있는 와인 목록이고, ' +
+      '각 와인의 "기존페어링" 필드에는 우리가 이미 적어둔 어울리는 음식 정보가 있다.\n' +
       JSON.stringify(menu) + '\n\n' +
       '오늘 먹을 음식: "' + food + '"\n\n' +
-      '이 음식에 가장 잘 어울리는 와인을 이 목록 안에서만 골라 좋은 순서대로 최대 3개 추천해라. ' +
+      '이 음식에 가장 잘 어울리는 와인을 이 목록 안에서만 좋은 순서로 최대 3개 추천해라. ' +
+      '와인의 "기존페어링" 필드에 이 음식(또는 같은 계열의 음식)이 이미 적혀 있으면 그것을 최우선 근거로 삼고, ' +
+      'reason에 그 문구를 언급해라. 기존페어링에 없어도 품종·종류로 보아 잘 어울리면 추천해도 된다. ' +
       '한식이면 양념의 맛(맵기·단맛·기름기)까지 고려해라. ' +
       '아래 JSON 배열로만 답하라.\n' +
-      '[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장"}]';
+      '[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "fromCellarPairing":true또는false}]';
 
     var picks = callGemini_([{ text: prompt }]);
     var list = Array.isArray(picks) ? picks : (picks.recommendations || picks.list || []);
@@ -737,7 +748,11 @@ function recommendByFood(token, food) {
     list.forEach(function (p) {
       for (var i = 0; i < owned.length; i++) {
         if (owned[i].rowIndex === p.id) {
-          out.push({ wine: owned[i], reason: p.reason || '' });
+          out.push({
+            wine: owned[i],
+            reason: p.reason || '',
+            matched: !!p.fromCellarPairing || !!directIds[p.id]
+          });
           break;
         }
       }
@@ -747,7 +762,10 @@ function recommendByFood(token, food) {
     // AI 실패 시 아래 키워드 매칭으로 넘어감
   }
 
-  return recommendByKeyword_(food, owned);
+  return recommendByKeyword_(food, owned).map(function (x) {
+    x.matched = !!directIds[x.wine.rowIndex];
+    return x;
+  });
 }
 
 /** AI를 못 쓸 때 쓰는 단순 키워드 매칭 대체 로직 */
@@ -766,18 +784,36 @@ function recommendByKeyword_(food, owned) {
     .map(function (x) { return { wine: x.wine, reason: '' }; });
 }
 
-/** 소비 통계: 월별 / 종류별 / 가격대별 마신 와인 집계 */
+/**
+ * "품종" 필드에서 개별 품종 이름만 뽑아낸다.
+ * 예: "카베르네 소비뇽 60%·메를로 40%" → ["카베르네 소비뇽", "메를로"]
+ * 블렌드 와인 한 병은 섞인 품종 각각에 1씩 잡힌다(비율 가중은 하지 않음 — 병 수 기준 집계).
+ */
+function parseGrapes_(raw) {
+  return String(raw || '')
+    .split(/[·,、]/)
+    .map(function (s) {
+      return s.replace(/\d+(\.\d+)?\s*%/g, '').replace(/[()]/g, '').trim();
+    })
+    .filter(Boolean);
+}
+
+/** 소비 통계: 월별 / 종류별 / 품종별 / 가격대별 마신 와인 집계 */
 function getStats(token) {
   var data = getWines(token);
   var drunk = data.wines.filter(function (w) { return w['상태'] === '마심'; });
 
-  var byMonth = {}, byType = {}, byPrice = {};
+  var byMonth = {}, byType = {}, byGrape = {}, byPrice = {};
   drunk.forEach(function (w) {
     var month = (w['마신날짜'] || '').slice(0, 7); // yyyy-MM
     if (month) byMonth[month] = (byMonth[month] || 0) + 1;
 
     var type = w['종류'] || '기타';
     byType[type] = (byType[type] || 0) + 1;
+
+    var grapes = parseGrapes_(w['품종']);
+    if (!grapes.length) grapes = ['품종 미상'];
+    grapes.forEach(function (g) { byGrape[g] = (byGrape[g] || 0) + 1; });
 
     var priceNum = parseInt(String(w['평균가격(국내·원)'] || '').replace(/[^0-9]/g, ''), 10);
     var bracket = !priceNum ? '가격정보없음'
@@ -788,5 +824,5 @@ function getStats(token) {
     byPrice[bracket] = (byPrice[bracket] || 0) + 1;
   });
 
-  return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byPrice: byPrice };
+  return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byGrape: byGrape, byPrice: byPrice };
 }
