@@ -209,7 +209,7 @@ function bootstrap() {
 }
 
 /* ---------- 화면 전환 ---------- */
-var TITLES = { Cellar:'셀러', Food:'추천', Add:'와인 추가', Stat:'기록' };
+var TITLES = { Cellar:'셀러', Food:'페어링 추천', Add:'와인 추가', Stat:'기록' };
 function showPage(p) {
   ['Cellar', 'Food', 'Add', 'Stat'].forEach(function (n) {
     document.getElementById('pg' + n).classList.toggle('on', n === p);
