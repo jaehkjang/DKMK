@@ -392,7 +392,7 @@ function enter(name, pw) {
   var key = normName_(display);
 
   if (key.length < 2) return { error: '이름은 2자 이상이어야 해요' };
-  if (pw.length < 4) return { error: '비밀번호는 4자 이상이어야 해요' };
+  if (!/^\d{4}$/.test(pw)) return { error: '비밀번호는 4자리 숫자로 입력해주세요' };
 
   var existing = findUser_(key);
   if (existing) {
@@ -1089,7 +1089,8 @@ var INDEX_HTML = `<!DOCTYPE html>
 
     <form class="auth-form" onsubmit="submitAuth(event)">
       <input id="authId" placeholder="셀러 이름" autocomplete="username" autocapitalize="none" spellcheck="false">
-      <input id="authPw" type="password" placeholder="비밀번호" autocomplete="current-password">
+      <input id="authPw" type="password" placeholder="비밀번호 4자리 숫자" autocomplete="current-password"
+        inputmode="numeric" pattern="[0-9]*" maxlength="4" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,4)">
       <button id="authBtn" type="submit">시작하기</button>
     </form>
     <div id="pinErr"></div>
@@ -1288,6 +1289,7 @@ var INDEX_HTML = `<!DOCTYPE html>
       var pw = document.getElementById('authPw').value;
       var err = document.getElementById('pinErr');
       if (!name || !pw) { err.textContent = '이름과 비밀번호를 입력해주세요'; return; }
+      if (!/^\\d{4}$/.test(pw)) { err.textContent = '비밀번호는 4자리 숫자로 입력해주세요'; return; }
 
       var btn = document.getElementById('authBtn');
       btn.disabled = true; btn.textContent = '잠시만요…';
