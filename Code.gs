@@ -383,7 +383,7 @@ function enter(name, pw) {
   var key = normName_(display);
 
   if (key.length < 2) return { error: '이름은 2자 이상이어야 해요' };
-  if (pw.length < 4) return { error: '비밀번호는 4자 이상이어야 해요' };
+  if (!/^\d{4}$/.test(pw)) return { error: '비밀번호는 4자리 숫자로 입력해주세요' };
 
   var existing = findUser_(key);
   if (existing) {
