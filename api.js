@@ -12,7 +12,7 @@
 
 const API = {
   // ▼▼▼ Apps Script를 웹 앱으로 배포한 뒤 나오는 실행 URL을 여기에 붙여넣으세요 ▼▼▼
-  URL: 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE',
+  URL: 'https://script.google.com/macros/s/AKfycbx_zKyPeA714VYu1m-i1XBYRAO23xWn_V5AH6BkyLfAnLxW8Y5Taoe_XuQDkGhXIObl/exec',
 
   // 로그인 후 받은 토큰만 보관 — 비밀번호는 저장하지 않음.
   // GitHub Pages는 주소가 고정이라(Apps Script HtmlService의 iframe과 달리) localStorage가 정상적으로 남는다.
