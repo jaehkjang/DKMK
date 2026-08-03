@@ -164,6 +164,20 @@
     .note { font-size:13px; padding:11px 13px; border-radius:11px; background:var(--wine-soft); color:#6E1729; margin-bottom:12px; line-height:1.5; }
     .btn-copy { display:inline-block; margin-right:6px; margin-bottom:6px; border:none; background:var(--wine); color:#fff; font-size:12.5px; font-weight:700; padding:9px 15px; border-radius:9px; text-decoration:none; }
     .btn-copy.ghost { background:transparent; color:var(--wine); border:1px solid var(--wine); }
+
+    /* 홈 화면 추가 / 공유 */
+    .act-row { display:flex; gap:10px; margin:12px 0 8px; }
+    .act {
+      flex:1; background:var(--surface); border:1px solid var(--line); border-radius:14px;
+      padding:14px 8px; font-size:13px; font-weight:700; color:var(--tx); box-shadow:var(--shadow);
+    }
+    .act .ic { display:block; font-size:22px; margin-bottom:5px; }
+    .step { display:flex; gap:11px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--line); font-size:14.5px; line-height:1.55; }
+    .step:last-child { border-bottom:none; }
+    .step .num {
+      flex:0 0 22px; height:22px; border-radius:50%; background:var(--wine); color:#fff;
+      font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; margin-top:1px;
+    }
     .note.warn { background:#FFF3E0; color:#8A5A00; }
 
     /* 셀러 인식 결과 */
@@ -335,6 +349,10 @@
     <div class="modal"><div class="grip"></div><div id="detailBody"></div></div>
   </div>
 
+  <div class="modal-bg" id="installModal" onclick="if(event.target===this) cm('installModal')">
+    <div class="modal"><div class="grip"></div><div id="installBody"></div></div>
+  </div>
+
   <div class="modal-bg" id="drinkModal" onclick="if(event.target===this) cm('drinkModal')">
     <div class="modal">
       <div class="grip"></div>
@@ -429,34 +447,119 @@
       }).enter(name, pw);
     }
 
-    /** 다음부터 자동으로 들어가려면 ?t=토큰 주소로 홈 화면에 추가하라고 한 번 안내 */
+    /** 로그인 직후 한 번, 홈 화면에 추가하라고 가볍게 안내 */
     function showBookmarkTip() {
-      google.script.run.withSuccessHandler(function (url) {
-        if (!url) return;
-        var full = url + '?t=' + encodeURIComponent(TOKEN);
-        var box = document.getElementById('bookmarkTip');
-        // target="_top"으로 바깥 창째로 이동시킨다. 그래야 주소창이 ?t= 주소로 바뀌고,
-        // 그 상태에서 홈 화면에 추가하면 바로가기가 토큰을 그대로 물고 간다.
-        box.innerHTML = '<div class="note">🔑 <b>다음부터 자동으로 들어가려면</b><br>' +
-          '아래 버튼을 누른 뒤, 그 화면에서 홈 화면에 추가하세요' +
-          '<div style="margin-top:9px">' +
-          '<a class="btn-copy" href="' + esc(full) + '" target="_top">이 주소로 열기</a>' +
-          '<button type="button" class="btn-copy ghost" onclick="copyTip(this)" data-url="' + esc(full) + '">주소 복사</button>' +
-          '<button type="button" class="btn-copy ghost" onclick="document.getElementById(\'bookmarkTip\').innerHTML=\'\'">닫기</button>' +
-          '</div></div>';
-      }).withFailureHandler(function () { /* 주소를 못 얻으면 안내를 건너뛴다 */ }).getAppUrl();
+      var box = document.getElementById('bookmarkTip');
+      box.innerHTML = '<div class="note">📱 <b>홈 화면에 두면 앱처럼 쓸 수 있어요</b>' +
+        '<div style="margin-top:9px">' +
+        '<button type="button" class="btn-copy" onclick="openInstall()">홈 화면에 추가</button>' +
+        '<button type="button" class="btn-copy ghost" onclick="document.getElementById(\'bookmarkTip\').innerHTML=\'\'">나중에</button>' +
+        '</div></div>';
     }
-    function copyTip(btn) {
-      var url = btn.dataset.url;
-      var done = function () { btn.textContent = '복사됨 ✓'; };
-      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, function () { fallbackCopy(url, done); });
-      else fallbackCopy(url, done);
+
+    /* ---------- 홈 화면 추가 / 공유 ---------- */
+
+    /** 기기 판별. 안내 문구가 기기마다 달라야 해서 필요하다. */
+    function platform() {
+      var ua = navigator.userAgent || '';
+      // 아이패드는 최근 iOS에서 데스크톱 UA를 쓴다 → 터치 지원 여부로 함께 판별
+      var isIOS = /iPad|iPhone|iPod/.test(ua) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isIOS) return 'ios';
+      if (/Android/i.test(ua)) return 'android';
+      return 'desktop';
+    }
+
+    var INSTALL_STEPS = {
+      ios: {
+        title: '아이폰 홈 화면에 추가',
+        steps: [
+          '아래 <b>내 주소로 열기</b>를 누르세요',
+          '화면 아래 <b>공유 버튼 <span style="font-size:15px">⬆️</span></b>를 누르세요',
+          '목록을 내려서 <b>홈 화면에 추가</b>를 누르세요',
+          '오른쪽 위 <b>추가</b>를 누르면 끝'
+        ],
+        warn: '사파리에서만 됩니다. 크롬으로 열었다면 사파리로 다시 열어주세요.'
+      },
+      android: {
+        title: '안드로이드 홈 화면에 추가',
+        steps: [
+          '아래 <b>내 주소로 열기</b>를 누르세요',
+          '크롬 오른쪽 위 <b>⋮</b>를 누르세요',
+          '<b>홈 화면에 추가</b> (또는 <b>앱 설치</b>)를 누르세요',
+          '<b>추가</b>를 누르면 끝'
+        ],
+        warn: '크롬에서 하시는 게 가장 잘 됩니다.'
+      },
+      desktop: {
+        title: '바로가기 만들기',
+        steps: [
+          '아래 <b>내 주소로 열기</b>를 누르세요',
+          '주소창 오른쪽 <b>설치 아이콘</b>을 누르거나',
+          '<b>Ctrl+D</b>(맥은 <b>⌘+D</b>)로 즐겨찾기에 추가하세요'
+        ],
+        warn: ''
+      }
+    };
+
+    function openInstall() {
+      var box = document.getElementById('installBody');
+      box.innerHTML = '<h3>📱 준비 중…</h3>';
+      om('installModal');
+
+      google.script.run.withSuccessHandler(function (url) {
+        var g = INSTALL_STEPS[platform()];
+        var mine = url ? url + '?t=' + encodeURIComponent(TOKEN) : '';
+        var list = g.steps.map(function (s, i) {
+          return '<div class="step"><span class="num">' + (i + 1) + '</span><span>' + s + '</span></div>';
+        }).join('');
+
+        box.innerHTML = '<h3>' + esc(g.title) + '</h3>' +
+          '<div class="facts" style="margin-top:12px">' + list + '</div>' +
+          (g.warn ? '<div class="note warn" style="margin-top:12px">⚠️ ' + g.warn + '</div>' : '') +
+          (mine
+            ? '<a class="primary-btn" style="display:block;text-align:center;text-decoration:none;margin-top:14px" href="' + esc(mine) + '" target="_top">내 주소로 열기</a>' +
+              '<div class="note" style="margin-top:10px">🔑 이 주소에는 자동 로그인 열쇠가 들어 있어요. <b>남에게 보내지 마세요.</b> 다른 사람에게는 아래 <b>앱 공유</b>를 쓰시면 됩니다.</div>'
+            : '<div class="note warn" style="margin-top:14px">주소를 가져오지 못했어요. 잠시 후 다시 시도해주세요.</div>') +
+          '<button class="more-toggle" onclick="cm(\'installModal\')">닫기</button>';
+      }).withFailureHandler(function (e) {
+        box.innerHTML = '<h3>📱 홈 화면에 추가</h3><div class="note warn" style="margin-top:12px">' + esc(e.message) + '</div>' +
+          '<button class="more-toggle" onclick="cm(\'installModal\')">닫기</button>';
+      }).getAppUrl();
+    }
+
+    /** 앱 공유. 토큰이 빠진 기본 주소만 보낸다(받은 사람은 이름·비번을 알아야 들어옴). */
+    function shareApp() {
+      google.script.run.withSuccessHandler(function (url) {
+        if (!url) { toast('주소를 가져오지 못했어요'); return; }
+        var data = { title: '와인 딸까 말까', text: '우리집 와인 셀러 앱이에요', url: url };
+        // 아이폰·안드로이드의 기본 공유 시트. iframe 안에서는 막히는 경우가 있어 실패하면 복사로.
+        if (navigator.share) {
+          navigator.share(data).catch(function () { copyText(url); });
+        } else {
+          copyText(url);
+        }
+      }).withFailureHandler(function (e) { toast('실패: ' + e.message); }).getAppUrl();
+    }
+
+    function copyText(text) {
+      var done = function () { toast('주소를 복사했어요 📋'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text, done); });
+      } else {
+        fallbackCopy(text, done);
+      }
     }
     function fallbackCopy(text, done) {
       var t = document.createElement('textarea');
-      t.value = text; document.body.appendChild(t); t.select();
-      try { document.execCommand('copy'); done(); } catch (e) {}
+      t.value = text;
+      t.style.position = 'fixed'; t.style.opacity = '0';
+      document.body.appendChild(t);
+      t.select(); t.setSelectionRange(0, text.length);
+      var okCopy = false;
+      try { okCopy = document.execCommand('copy'); } catch (e) {}
       document.body.removeChild(t);
+      if (okCopy) done(); else toast('복사가 안 돼요. 주소창을 길게 눌러 복사해주세요');
     }
 
     /** 주소에 실려온 토큰이 아직 유효한지 확인하고 앱을 연다 */
@@ -836,8 +939,12 @@
           sect('종류별', s.byType, true) +
           sect('월별', s.byMonth, false) +
           sect('가격대별', s.byPrice, false) +
-          '<div style="text-align:center;margin:26px 0 8px;font-size:12.5px;color:var(--sub)">' +
-          '🍷 ' + esc(ME) + ' 셀러</div>';
+          '<div style="text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--sub)">' +
+          '🍷 ' + esc(ME) + ' 셀러</div>' +
+          '<div class="act-row">' +
+          '<button class="act" onclick="openInstall()"><span class="ic">📱</span>홈 화면에 추가</button>' +
+          '<button class="act" onclick="shareApp()"><span class="ic">🔗</span>앱 공유</button>' +
+          '</div>';
       }).withFailureHandler(function (e) {
         area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(e.message) + '</div>';
       }).getStats(TOKEN);
