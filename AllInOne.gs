@@ -707,9 +707,10 @@ function getDrunkMatches(token, keyword) {
 
 /**
  * 음식 입력 → 보유 와인 중 추천.
- * AI가 실제 페어링 지식으로 순위와 이유를 정해준다(키워드가 안 겹쳐도 추천 가능).
+ * 각 와인의 "추천 페어링" 필드(셀러에 이미 적어둔 정보)를 최우선 근거로 삼고,
+ * 거기 없어도 품종/종류로 AI가 순위·이유를 정한다(키워드가 안 겹쳐도 추천 가능).
  * API 실패 시 키워드 매칭으로 자동 대체.
- * 반환: [{ wine, reason }]
+ * 반환: [{ wine, reason, matched }] — matched는 셀러 페어링 정보에 직접 근거했는지
  */
 function recommendByFood(token, food) {
   requireUser_(token);
@@ -719,6 +720,13 @@ function recommendByFood(token, food) {
   var owned = getWines(token).wines.filter(function (w) { return w['상태'] === '보유'; });
   if (!owned.length) return [];
 
+  // 셀러에 이미 적힌 페어링 문구와 글자가 직접 겹치는 와인 — 우리 데이터가 근거인 경우
+  var directIds = {};
+  owned.forEach(function (w) {
+    var text = String(w['추천 페어링'] || '');
+    if (text && food && text.indexOf(food) !== -1) directIds[w.rowIndex] = true;
+  });
+
   try {
     var menu = owned.map(function (w) {
       return {
@@ -727,17 +735,20 @@ function recommendByFood(token, food) {
         종류: w['종류'],
         품종: w['품종'],
         생산지: w['생산지/국가'],
-        기존페어링: w['추천 페어링']
+        기존페어링: w['추천 페어링'] || ''
       };
     });
 
-    var prompt = '너는 소믈리에다. 아래는 우리 집 와인 셀러에 지금 있는 와인 목록이다.\n' +
+    var prompt = '너는 소믈리에다. 아래는 우리 집 와인 셀러에 지금 있는 와인 목록이고, ' +
+      '각 와인의 "기존페어링" 필드에는 우리가 이미 적어둔 어울리는 음식 정보가 있다.\n' +
       JSON.stringify(menu) + '\n\n' +
       '오늘 먹을 음식: "' + food + '"\n\n' +
-      '이 음식에 가장 잘 어울리는 와인을 이 목록 안에서만 골라 좋은 순서대로 최대 3개 추천해라. ' +
+      '이 음식에 가장 잘 어울리는 와인을 이 목록 안에서만 좋은 순서로 최대 3개 추천해라. ' +
+      '와인의 "기존페어링" 필드에 이 음식(또는 같은 계열의 음식)이 이미 적혀 있으면 그것을 최우선 근거로 삼고, ' +
+      'reason에 그 문구를 언급해라. 기존페어링에 없어도 품종·종류로 보아 잘 어울리면 추천해도 된다. ' +
       '한식이면 양념의 맛(맵기·단맛·기름기)까지 고려해라. ' +
       '아래 JSON 배열로만 답하라.\n' +
-      '[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장"}]';
+      '[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "fromCellarPairing":true또는false}]';
 
     var picks = callGemini_([{ text: prompt }]);
     var list = Array.isArray(picks) ? picks : (picks.recommendations || picks.list || []);
@@ -746,7 +757,11 @@ function recommendByFood(token, food) {
     list.forEach(function (p) {
       for (var i = 0; i < owned.length; i++) {
         if (owned[i].rowIndex === p.id) {
-          out.push({ wine: owned[i], reason: p.reason || '' });
+          out.push({
+            wine: owned[i],
+            reason: p.reason || '',
+            matched: !!p.fromCellarPairing || !!directIds[p.id]
+          });
           break;
         }
       }
@@ -756,7 +771,10 @@ function recommendByFood(token, food) {
     // AI 실패 시 아래 키워드 매칭으로 넘어감
   }
 
-  return recommendByKeyword_(food, owned);
+  return recommendByKeyword_(food, owned).map(function (x) {
+    x.matched = !!directIds[x.wine.rowIndex];
+    return x;
+  });
 }
 
 /** AI를 못 쓸 때 쓰는 단순 키워드 매칭 대체 로직 */
@@ -775,18 +793,36 @@ function recommendByKeyword_(food, owned) {
     .map(function (x) { return { wine: x.wine, reason: '' }; });
 }
 
-/** 소비 통계: 월별 / 종류별 / 가격대별 마신 와인 집계 */
+/**
+ * "품종" 필드에서 개별 품종 이름만 뽑아낸다.
+ * 예: "카베르네 소비뇽 60%·메를로 40%" → ["카베르네 소비뇽", "메를로"]
+ * 블렌드 와인 한 병은 섞인 품종 각각에 1씩 잡힌다(비율 가중은 하지 않음 — 병 수 기준 집계).
+ */
+function parseGrapes_(raw) {
+  return String(raw || '')
+    .split(/[·,、]/)
+    .map(function (s) {
+      return s.replace(/\d+(\.\d+)?\s*%/g, '').replace(/[()]/g, '').trim();
+    })
+    .filter(Boolean);
+}
+
+/** 소비 통계: 월별 / 종류별 / 품종별 / 가격대별 마신 와인 집계 */
 function getStats(token) {
   var data = getWines(token);
   var drunk = data.wines.filter(function (w) { return w['상태'] === '마심'; });
 
-  var byMonth = {}, byType = {}, byPrice = {};
+  var byMonth = {}, byType = {}, byGrape = {}, byPrice = {};
   drunk.forEach(function (w) {
     var month = (w['마신날짜'] || '').slice(0, 7); // yyyy-MM
     if (month) byMonth[month] = (byMonth[month] || 0) + 1;
 
     var type = w['종류'] || '기타';
     byType[type] = (byType[type] || 0) + 1;
+
+    var grapes = parseGrapes_(w['품종']);
+    if (!grapes.length) grapes = ['품종 미상'];
+    grapes.forEach(function (g) { byGrape[g] = (byGrape[g] || 0) + 1; });
 
     var priceNum = parseInt(String(w['평균가격(국내·원)'] || '').replace(/[^0-9]/g, ''), 10);
     var bracket = !priceNum ? '가격정보없음'
@@ -797,7 +833,7 @@ function getStats(token) {
     byPrice[bracket] = (byPrice[bracket] || 0) + 1;
   });
 
-  return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byPrice: byPrice };
+  return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byGrape: byGrape, byPrice: byPrice };
 }
 
 
@@ -827,6 +863,8 @@ var INDEX_HTML = `<!DOCTYPE html>
     html, body { overscroll-behavior-y:none; }
     body {
       margin:0 auto; max-width:480px; min-height:100vh;
+      /* 단어 중간이 잘려서 다음 줄로 안 넘어가게. 줄바꿈은 띄어쓰기 단위로만 일어난다 */
+      word-break:keep-all; overflow-wrap:normal;
       font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Segoe UI",Roboto,sans-serif;
       background:var(--bg); color:var(--tx);
       padding-bottom:86px; font-size:15px;
@@ -856,7 +894,7 @@ var INDEX_HTML = `<!DOCTYPE html>
     }
     #pinScreen .t { font-size:22px; font-weight:700; letter-spacing:-.3px; }
     .auth-form { display:flex; flex-direction:column; gap:10px; width:250px; }
-    .auth-hint { width:260px; text-align:center; font-size:12.5px; line-height:1.7; color:rgba(255,255,255,.62); }
+    .auth-hint { width:min(86vw, 320px); text-align:center; font-size:12.5px; line-height:1.7; color:rgba(255,255,255,.62); }
     .auth-form input {
       width:100%; padding:14px 16px; border-radius:14px; border:none;
       background:rgba(255,255,255,.16); color:#fff; font-size:16px; font-weight:600;
@@ -943,6 +981,9 @@ var INDEX_HTML = `<!DOCTYPE html>
       padding:9px 15px; border-radius:11px; font-size:14px; font-weight:700;
     }
     .chips button.on { border-color:var(--c); background:var(--c-soft); color:var(--c); }
+    .chips.sub button { font-size:13px; padding:7px 13px; opacity:.9; }
+    .chips.sub:empty { display:none; }
+    .match-badge { display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:800; color:var(--ok); background:#E7F2E9; padding:3px 9px; border-radius:20px; margin-top:8px; }
 
     .more-toggle { width:100%; text-align:center; padding:12px; color:var(--sub); font-size:13.5px; font-weight:700; background:none; border:none; }
     #moreFields { display:none; }
@@ -1024,8 +1065,10 @@ var INDEX_HTML = `<!DOCTYPE html>
     .hero .n { font-size:44px; font-weight:800; line-height:1; }
     .hero .l { font-size:13px; opacity:.85; margin-top:7px; }
     .sect { font-size:13px; font-weight:800; color:var(--sub); margin:20px 0 10px; }
-    .bar-row { display:flex; align-items:center; gap:11px; padding:8px 0; }
-    .bar-row .k { flex:0 0 88px; font-size:13.5px; font-weight:700; }
+    /* 레이블을 바 위에 따로 두어, 길거나 괄호 붙은 이름(품종 등)도 한 줄에 다 들어오게 한다 */
+    .bar-row { padding:8px 0; }
+    .bar-row .k { display:block; font-size:13.5px; font-weight:700; white-space:nowrap; margin-bottom:6px; }
+    .bar-row .row2 { display:flex; align-items:center; gap:11px; }
     .bar-wrap { flex:1; height:22px; background:#F0E7DC; border-radius:7px; overflow:hidden; }
     .bar { height:100%; background:var(--c,var(--wine)); border-radius:7px; }
     .bar-row .n { flex:0 0 26px; text-align:right; font-size:13.5px; font-weight:800; color:var(--sub); }
@@ -1050,7 +1093,7 @@ var INDEX_HTML = `<!DOCTYPE html>
       <button id="authBtn" type="submit">시작하기</button>
     </form>
     <div id="pinErr"></div>
-    <div class="auth-hint">처음 쓰는 이름이면 셀러가 새로 만들어져요.<br>같은 이름·비밀번호를 넣으면 둘이 같은 셀러를 봅니다.</div>
+    <div class="auth-hint">처음 쓰는 이름이면 셀러가 새로 만들어져요. 같은 이름·비밀번호를 넣으면 둘이 같은 셀러를 봅니다.</div>
   </div>
 
   <header>
@@ -1078,6 +1121,7 @@ var INDEX_HTML = `<!DOCTYPE html>
         <input id="foodInput" placeholder="오늘 뭐 먹어요?" onkeydown="if(event.key==='Enter')doRecommend()">
       </div>
       <div class="chips" id="foodQuick"></div>
+      <div class="chips sub" id="foodSub"></div>
       <button class="primary-btn" onclick="doRecommend()">어울리는 와인 찾기</button>
       <div id="foodArea" style="margin-top:18px;"></div>
     </div>
@@ -1192,7 +1236,19 @@ var INDEX_HTML = `<!DOCTYPE html>
       return { n:t || '기타', c:'#9A8C7E', s:'#F0EBE5' };
     }
 
-    var QUICK_FOODS = ['삼겹살', '스테이크', '치킨', '파스타', '회', '치즈'];
+    /**
+     * 음식 빠른 선택. 종류가 많은 카테고리(치킨/파스타/치즈)는 하위 메뉴로 세분화한다.
+     * children이 없으면 눌렀을 때 바로 검색, 있으면 하위 칩을 펼친다.
+     */
+    var FOOD_MENU = [
+      { label: '삼겹살' },
+      { label: '스테이크' },
+      { label: '회' },
+      { label: '치킨', children: ['후라이드', '양념치킨', '간장치킨', '마늘치킨', '핫윙', '순살치킨'] },
+      { label: '파스타', children: ['토마토파스타', '크림파스타', '오일파스타', '로제파스타', '봉골레파스타', '미트소스파스타'] },
+      { label: '치즈', children: ['브리치즈', '까망베르', '체다치즈', '블루치즈', '고다치즈', '파르미지아노'] }
+    ];
+    var OPEN_FOOD_CAT = null;
 
     /* ---------- 헬퍼 ---------- */
     function om(id) { document.getElementById(id).classList.add('on'); }
@@ -1553,10 +1609,32 @@ var INDEX_HTML = `<!DOCTYPE html>
     }
     function renderQuickFoods() {
       var el = document.getElementById('foodQuick');
-      el.innerHTML = QUICK_FOODS.map(function (f) {
-        return '<button type="button" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + f + '</button>';
+      el.innerHTML = FOOD_MENU.map(function (item) {
+        var hasKids = item.children && item.children.length;
+        var isOpen = OPEN_FOOD_CAT === item.label;
+        var arrow = hasKids ? (isOpen ? ' ▲' : ' ▼') : '';
+        return '<button type="button" class="' + (isOpen ? 'on' : '') + '" data-cat="' + esc(item.label) + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(item.label) + arrow + '</button>';
       }).join('');
       el.querySelectorAll('button').forEach(function (b) {
+        var item = FOOD_MENU.filter(function (f) { return f.label === b.dataset.cat; })[0];
+        b.onclick = function () {
+          if (item.children && item.children.length) {
+            OPEN_FOOD_CAT = (OPEN_FOOD_CAT === item.label) ? null : item.label;
+            renderQuickFoods();
+          } else {
+            document.getElementById('foodInput').value = item.label;
+            doRecommend();
+          }
+        };
+      });
+
+      var sub = document.getElementById('foodSub');
+      var open = FOOD_MENU.filter(function (f) { return f.label === OPEN_FOOD_CAT; })[0];
+      if (!open) { sub.innerHTML = ''; return; }
+      sub.innerHTML = open.children.map(function (c) {
+        return '<button type="button" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(c) + '</button>';
+      }).join('');
+      sub.querySelectorAll('button').forEach(function (b) {
         b.onclick = function () { document.getElementById('foodInput').value = b.textContent; doRecommend(); };
       });
     }
@@ -1712,8 +1790,9 @@ var INDEX_HTML = `<!DOCTYPE html>
         }
         area.innerHTML = list.map(function (x) {
           var w = x.wine || x;
+          var badge = x.matched ? '<div class="match-badge">🍷 이 와인 페어링 정보에 있어요</div>' : '';
           var reason = x.reason ? '<div class="reason">' + esc(x.reason) + '</div>' : '';
-          return cardHtml(w, reason);
+          return cardHtml(w, badge + reason);
         }).join('');
       }).withFailureHandler(function (e) {
         area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(e.message) + '</div>';
@@ -1735,13 +1814,14 @@ var INDEX_HTML = `<!DOCTYPE html>
           return '<div class="sect">' + title + '</div>' + es.map(function (e) {
             var c = colorByType ? typeStyle(e[0]).c : 'var(--wine)';
             return '<div class="bar-row"><div class="k">' + esc(e[0]) + '</div>' +
-              '<div class="bar-wrap"><div class="bar" style="--c:' + c + ';width:' + (e[1] / max * 100) + '%"></div></div>' +
-              '<div class="n">' + e[1] + '</div></div>';
+              '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:' + c + ';width:' + (e[1] / max * 100) + '%"></div></div>' +
+              '<div class="n">' + e[1] + '</div></div></div>';
           }).join('');
         }
         area.innerHTML =
           '<div class="hero"><div class="n">' + s.totalDrunk + '</div><div class="l">지금까지 마신 와인</div></div>' +
           sect('종류별', s.byType, true) +
+          sect('품종별', s.byGrape, false) +
           sect('월별', s.byMonth, false) +
           sect('가격대별', s.byPrice, false) +
           '<div style="text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--sub)">' +
