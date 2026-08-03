@@ -63,8 +63,19 @@ function doGet(e) {
 
   // 홈 화면 아이콘은 이 바깥 페이지의 파비콘에서 가져간다.
   // 우리 HTML 안의 <link rel="icon">은 iframe 안이라 폰이 보지 못한다.
+  //
+  // setFaviconUrl은 주소를 까다롭게 검사해서 거부하면 예외를 던진다.
+  // 아이콘 하나 때문에 앱 전체가 안 열리면 안 되므로 반드시 감싼다.
   var icon = prop_('ICON_URL');
-  if (icon) out.setFaviconUrl(icon);
+  if (icon && prop_('ICON_URL_BAD') !== icon) {
+    try {
+      out.setFaviconUrl(icon);
+    } catch (err) {
+      // 거부된 주소를 기억해 두고 매 요청마다 다시 시도하지 않는다
+      PropertiesService.getScriptProperties().setProperty('ICON_URL_BAD', icon);
+      Logger.log('파비콘 거부됨: ' + icon + ' — ' + err.message);
+    }
+  }
   return out;
 }
 
@@ -78,10 +89,12 @@ function getAppUrl() {
 }
 
 /**
- * 아이콘을 드라이브에 올려 공개 URL을 만들고 ICON_URL 속성에 저장한다.
- * setFaviconUrl은 데이터 URI가 아니라 실제 주소를 요구하므로 호스팅이 필요하다.
+ * 아이콘을 드라이브에 올려 공개 주소를 만들고 ICON_URL 속성에 저장한다.
+ * setFaviconUrl은 데이터 URI를 받지 않아 호스팅이 필요하고, 주소 형식도 까다롭다.
+ * 그래서 여러 형식을 시도해 "정말 이미지를 돌려주는" 것만 저장한다.
  */
 function setupIcon() {
+  var props = PropertiesService.getScriptProperties();
   var folders = DriveApp.getFoldersByName(PHOTO_FOLDER_NAME);
   var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(PHOTO_FOLDER_NAME);
 
@@ -92,10 +105,39 @@ function setupIcon() {
   var blob = Utilities.newBlob(Utilities.base64Decode(ICON_PNG_B64), 'image/png', ICON_FILE_NAME);
   var file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  var id = file.getId();
 
-  var url = 'https://lh3.googleusercontent.com/d/' + file.getId() + '=s512';
-  PropertiesService.getScriptProperties().setProperty('ICON_URL', url);
-  return url;
+  var candidates = [
+    'https://drive.google.com/uc?export=view&id=' + id,
+    'https://lh3.googleusercontent.com/d/' + id,
+    'https://drive.google.com/thumbnail?id=' + id + '&sz=w512'
+  ];
+
+  props.deleteProperty('ICON_URL_BAD');
+  for (var i = 0; i < candidates.length; i++) {
+    if (servesImage_(candidates[i])) {
+      props.setProperty('ICON_URL', candidates[i]);
+      return candidates[i];
+    }
+  }
+
+  // 어느 것도 이미지를 돌려주지 않으면 아이콘을 포기한다(앱은 그대로 동작).
+  props.deleteProperty('ICON_URL');
+  Logger.log('아이콘 주소를 만들지 못했습니다. 기본 아이콘으로 동작합니다.');
+  return '';
+}
+
+/** 그 주소가 실제로 이미지를 돌려주는지 확인 */
+function servesImage_(url) {
+  try {
+    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+    if (resp.getResponseCode() !== 200) return false;
+    var headers = resp.getHeaders();
+    var type = String(headers['Content-Type'] || headers['content-type'] || '');
+    return type.indexOf('image/') === 0;
+  } catch (err) {
+    return false;
+  }
 }
 
 /**
@@ -121,7 +163,9 @@ function checkSetup() {
     lines.push('시트 연결       : ❌ ' + err.message);
   }
 
-  lines.push('ICON_URL        : ' + (icon ? icon : '❌ 없음 → setup(또는 setupIcon) 실행 필요'));
+  lines.push('ICON_URL        : ' + (icon ? icon : '없음 (기본 아이콘으로 동작)'));
+  var bad = prop_('ICON_URL_BAD');
+  if (bad) lines.push('  ⚠ 이 주소는 파비콘으로 거부됐습니다. setupIcon을 다시 실행해보세요.');
   if (icon) {
     try {
       var resp = UrlFetchApp.fetch(icon, { muteHttpExceptions: true, followRedirects: true });
