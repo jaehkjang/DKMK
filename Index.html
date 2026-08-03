@@ -50,14 +50,17 @@
       background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M31 17h38v13c0 10.5-8.5 19-19 19s-19-8.5-19-19z' fill='%23ffffff'/%3E%3Cpath d='M32.4 27h35.2v3c0 10.5-8.5 19-17.6 19s-17.6-8.5-17.6-19z' fill='%23E8A0AF'/%3E%3Cpath d='M48 49h4v26h-4z' fill='%23ffffff'/%3E%3Crect x='33' y='75' width='34' height='5.5' rx='2.75' fill='%23ffffff'/%3E%3C/svg%3E") no-repeat center/contain;
     }
     #pinScreen .t { font-size:22px; font-weight:700; letter-spacing:-.3px; }
-    #pinInput {
-      width:190px; text-align:center; font-size:30px; letter-spacing:14px; text-indent:14px;
-      padding:14px 0; border-radius:16px; border:none; background:rgba(255,255,255,.16);
-      color:#fff; font-weight:700;
+    .auth-form { display:flex; flex-direction:column; gap:10px; width:250px; }
+    .auth-hint { width:260px; text-align:center; font-size:12.5px; line-height:1.7; color:rgba(255,255,255,.62); }
+    .auth-form input {
+      width:100%; padding:14px 16px; border-radius:14px; border:none;
+      background:rgba(255,255,255,.16); color:#fff; font-size:16px; font-weight:600;
     }
-    #pinInput::placeholder { color:rgba(255,255,255,.5); letter-spacing:2px; text-indent:0; font-size:16px; font-weight:400; }
-    #pinBtn { padding:14px 44px; border-radius:16px; border:none; background:#fff; color:var(--wine); font-size:16px; font-weight:800; }
-    #pinErr { color:#FFD9DF; font-size:14px; height:18px; }
+    .auth-form input::placeholder { color:rgba(255,255,255,.55); font-weight:400; }
+    .auth-form input:focus { outline:2px solid rgba(255,255,255,.5); }
+    #authBtn { padding:15px; border-radius:14px; border:none; background:#fff; color:var(--wine); font-size:16px; font-weight:800; margin-top:2px; }
+    #authBtn:disabled { opacity:.6; }
+    #pinErr { color:#FFD9DF; font-size:13.5px; min-height:18px; text-align:center; width:250px; line-height:1.5; }
 
     /* ---------- 헤더 ---------- */
     header { padding:20px 16px 12px; }
@@ -221,9 +224,14 @@
   <div id="pinScreen">
     <div class="glass"></div>
     <div class="t">와인 딸까 말까</div>
-    <input id="pinInput" inputmode="numeric" maxlength="4" placeholder="PIN 4자리">
-    <button id="pinBtn" onclick="submitPin()">열기</button>
+
+    <form class="auth-form" onsubmit="submitAuth(event)">
+      <input id="authId" placeholder="셀러 이름" autocomplete="username" autocapitalize="none" spellcheck="false">
+      <input id="authPw" type="password" placeholder="비밀번호" autocomplete="current-password">
+      <button id="authBtn" type="submit">시작하기</button>
+    </form>
     <div id="pinErr"></div>
+    <div class="auth-hint">처음 쓰는 이름이면 셀러가 새로 만들어져요.<br>같은 이름·비밀번호를 넣으면 둘이 같은 셀러를 봅니다.</div>
   </div>
 
   <header>
@@ -386,45 +394,50 @@
       return s;
     }
 
-    /* ---------- 잠금 ----------
-     * 주소에 ?k=PIN 이 붙어 있으면 서버가 이 값을 true로 바꿔서 내려준다.
+    /* ---------- 로그인 ----------
+     * 주소에 ?t=토큰 이 붙어 있으면 서버가 아래 값에 토큰을 심어서 내려준다.
      * Apps Script는 화면을 매번 다른 googleusercontent 주소의 iframe으로 서빙해서
-     * localStorage가 남지 않는다. 그래서 "기억"은 주소 자체가 담당한다.
+     * localStorage가 남지 않는다. 그래서 "로그인 기억"은 주소 자체가 담당한다.
      */
-    var PRE_UNLOCKED = /*UNLOCKED*/false;
+    var TOKEN = '/*TOKEN*/';
+    var ME = '';
 
-    function rememberUnlock() {
-      try { localStorage.setItem('wine_unlocked', '1'); } catch (e) {}
-    }
-    function isUnlocked() {
-      if (PRE_UNLOCKED) return true;
-      try { return localStorage.getItem('wine_unlocked') === '1'; } catch (e) { return false; }
+    /** 이름 + 비번 하나로 끝. 없는 이름이면 셀러가 새로 생기고, 있으면 그 셀러로 들어간다. */
+    function submitAuth(ev) {
+      ev.preventDefault();
+      var name = document.getElementById('authId').value.trim();
+      var pw = document.getElementById('authPw').value;
+      var err = document.getElementById('pinErr');
+      if (!name || !pw) { err.textContent = '이름과 비밀번호를 입력해주세요'; return; }
+
+      var btn = document.getElementById('authBtn');
+      btn.disabled = true; btn.textContent = '잠시만요…';
+      err.textContent = '';
+
+      google.script.run.withSuccessHandler(function (res) {
+        btn.disabled = false; btn.textContent = '시작하기';
+        if (!res || res.error) { err.textContent = (res && res.error) || '문제가 생겼어요'; return; }
+        TOKEN = res.token; ME = res.name;
+        document.getElementById('pinScreen').style.display = 'none';
+        if (res.moved) toast('기존 와인 ' + res.moved + '병을 가져왔어요');
+        else if (res.created) toast(res.name + ' 셀러를 만들었어요 🍾');
+        showBookmarkTip();
+        load();
+      }).withFailureHandler(function (e) {
+        btn.disabled = false; btn.textContent = '시작하기';
+        err.textContent = e.message || '문제가 생겼어요';
+      }).enter(name, pw);
     }
 
-    function submitPin() {
-      var pin = document.getElementById('pinInput').value;
-      google.script.run.withSuccessHandler(function (ok) {
-        if (ok) {
-          rememberUnlock();
-          document.getElementById('pinScreen').style.display = 'none';
-          showBookmarkTip(pin);
-          load();
-        } else {
-          document.getElementById('pinErr').textContent = 'PIN이 맞지 않아요';
-          document.getElementById('pinInput').value = '';
-        }
-      }).checkPin(pin);
-    }
-
-    /** PIN을 매번 안 치려면 ?k=PIN 주소로 홈 화면에 추가하라고 한 번 안내 */
-    function showBookmarkTip(pin) {
+    /** 다음부터 자동으로 들어가려면 ?t=토큰 주소로 홈 화면에 추가하라고 한 번 안내 */
+    function showBookmarkTip() {
       google.script.run.withSuccessHandler(function (url) {
         if (!url) return;
-        var full = url + '?k=' + encodeURIComponent(pin);
+        var full = url + '?t=' + encodeURIComponent(TOKEN);
         var box = document.getElementById('bookmarkTip');
-        // target="_top"으로 바깥 창째로 이동시킨다. 그래야 주소창이 ?k= 주소로 바뀌고,
-        // 그 상태에서 홈 화면에 추가하면 바로가기가 열쇠를 그대로 물고 간다.
-        box.innerHTML = '<div class="note">🔑 <b>다음부터 PIN 안 치려면</b><br>' +
+        // target="_top"으로 바깥 창째로 이동시킨다. 그래야 주소창이 ?t= 주소로 바뀌고,
+        // 그 상태에서 홈 화면에 추가하면 바로가기가 토큰을 그대로 물고 간다.
+        box.innerHTML = '<div class="note">🔑 <b>다음부터 자동으로 들어가려면</b><br>' +
           '아래 버튼을 누른 뒤, 그 화면에서 홈 화면에 추가하세요' +
           '<div style="margin-top:9px">' +
           '<a class="btn-copy" href="' + esc(full) + '" target="_top">이 주소로 열기</a>' +
@@ -446,7 +459,22 @@
       document.body.removeChild(t);
     }
 
-    if (isUnlocked()) document.getElementById('pinScreen').style.display = 'none';
+    /** 주소에 실려온 토큰이 아직 유효한지 확인하고 앱을 연다 */
+    function bootstrap() {
+      if (!TOKEN) return;
+      google.script.run.withSuccessHandler(function (res) {
+        if (res && res.ok) {
+          ME = res.name;
+          document.getElementById('pinScreen').style.display = 'none';
+          load();
+        } else {
+          TOKEN = '';
+          document.getElementById('pinErr').textContent = '다시 들어와주세요';
+        }
+      }).withFailureHandler(function () {
+        TOKEN = '';
+      }).checkToken(TOKEN);
+    }
 
     /* ---------- 화면 전환 ---------- */
     var TITLES = { Cellar:'셀러', Food:'추천', Add:'와인 추가', Stat:'기록' };
@@ -467,7 +495,7 @@
         ALL_WINES = d.wines; renderList();
       }).withFailureHandler(function (e) {
         document.getElementById('listArea').innerHTML = '<div class="empty"><span class="big">😵</span>불러오지 못했어요<br>' + esc(e.message) + '</div>';
-      }).getWines();
+      }).getWines(TOKEN);
     }
 
     /* ---------- 목록 ---------- */
@@ -589,7 +617,7 @@
       google.script.run.withSuccessHandler(function () {
         toast('기록했어요 🍷'); cm('drinkModal'); load();
       }).withFailureHandler(function (e) { toast('실패: ' + e.message); })
-        .markDrunk(PENDING_ROW, {
+        .markDrunk(TOKEN, PENDING_ROW, {
           '평점': CURRENT_RATING,
           '한줄평': document.getElementById('drinkComment').value,
           '함께한음식': document.getElementById('drinkFood').value
@@ -598,7 +626,7 @@
     function doUnmark(r) {
       google.script.run.withSuccessHandler(function () {
         toast('셀러로 되돌렸어요'); load();
-      }).withFailureHandler(function (e) { toast('실패: ' + e.message); }).unmarkDrunk(r);
+      }).withFailureHandler(function (e) { toast('실패: ' + e.message); }).unmarkDrunk(TOKEN, r);
     }
 
     /* ---------- 추가: 종류 칩 ---------- */
@@ -659,7 +687,7 @@
         checkSimilar();
       }).withFailureHandler(function (err) {
         note.innerHTML = '<div class="note warn">읽지 못했어요. 직접 입력해주세요<br><small>' + esc(err.message) + '</small></div>';
-      }).recognizeLabel(PHOTO_DATAURL);
+      }).recognizeLabel(TOKEN, PHOTO_DATAURL);
     }
 
     function recognizeAll(note) {
@@ -677,7 +705,7 @@
         renderPicks();
       }).withFailureHandler(function (err) {
         note.innerHTML = '<div class="note warn">인식 실패<br><small>' + esc(err.message) + '</small></div>';
-      }).recognizeCellar(PHOTO_DATAURL);
+      }).recognizeCellar(TOKEN, PHOTO_DATAURL);
     }
 
     function renderPicks() {
@@ -715,7 +743,7 @@
         cancelPick(); goCellarOwned();
       }).withFailureHandler(function (e) {
         toast('실패: ' + e.message); btn.disabled = false; renderPicks();
-      }).addWines(sel);
+      }).addWines(TOKEN, sel);
     }
 
     /* ---------- 중복 힌트 ---------- */
@@ -730,7 +758,7 @@
           box.innerHTML = (ms && ms.length)
             ? '<div class="note">💡 비슷한 걸 ' + ms.length + '번 마셔봤어요: ' + ms.map(function (m) { return esc(m['와인명']); }).join(', ') + '</div>'
             : '';
-        }).getDrunkMatches(kw);
+        }).getDrunkMatches(TOKEN, kw);
       }, 400);
     }
 
@@ -760,7 +788,7 @@
       }).withFailureHandler(function (e2) {
         toast('실패: ' + e2.message);
         btn.disabled = false; btn.textContent = '셀러에 넣기';
-      }).addWine(data, PHOTO_DATAURL);
+      }).addWine(TOKEN, data, PHOTO_DATAURL);
     }
 
     /* ---------- 추천 ---------- */
@@ -781,7 +809,7 @@
         }).join('');
       }).withFailureHandler(function (e) {
         area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(e.message) + '</div>';
-      }).recommendByFood(food);
+      }).recommendByFood(TOKEN, food);
     }
 
     /* ---------- 기록 ---------- */
@@ -807,15 +835,17 @@
           '<div class="hero"><div class="n">' + s.totalDrunk + '</div><div class="l">지금까지 마신 와인</div></div>' +
           sect('종류별', s.byType, true) +
           sect('월별', s.byMonth, false) +
-          sect('가격대별', s.byPrice, false);
+          sect('가격대별', s.byPrice, false) +
+          '<div style="text-align:center;margin:26px 0 8px;font-size:12.5px;color:var(--sub)">' +
+          '🍷 ' + esc(ME) + ' 셀러</div>';
       }).withFailureHandler(function (e) {
         area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(e.message) + '</div>';
-      }).getStats();
+      }).getStats(TOKEN);
     }
 
     renderTypeChips();
     renderQuickFoods();
-    if (isUnlocked()) load();
+    bootstrap();
   </script>
 </body>
 </html>

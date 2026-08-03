@@ -9,16 +9,22 @@
  *
  * 최초 1회 설정:
  * 1) 프로젝트 설정 → 스크립트 속성에 추가
- *    - WINE_PIN         : 나와 아내가 같이 쓸 4자리 PIN (예: 1234)
  *    - GEMINI_API_KEY   : Gemini API 무료 키 (https://aistudio.google.com/apikey 에서 발급)
  *    - SHEET_ID         : (B 방식일 때만) 와인리스트 스프레드시트 ID
- * 2) 이 파일의 setup 함수를 에디터에서 한 번 실행
- *    (시트에 새 컬럼 추가 + 홈 화면 아이콘을 드라이브에 올려 등록)
- * 3) 배포 → 웹 앱. 코드를 고친 뒤에는 [배포 관리] → 연필(수정) → 버전: 새 버전 → 배포
+ * 2) 배포 → 웹 앱. 첫 접속 때 컬럼/아이콘 설정이 자동으로 끝납니다.
+ *    코드를 고친 뒤에는 [배포 관리] → 연필(수정) → 버전: 새 버전 → 배포
  *    (이렇게 해야 주소가 그대로 유지됩니다. [새 배포]를 누르면 주소가 바뀝니다)
+ *
+ * 셀러(계정):
+ *  - 첫 화면에서 이름과 비밀번호만 넣습니다. 처음 보는 이름이면 셀러를 새로 만들고,
+ *    이미 있는 이름이면 비번을 확인하고 그 셀러로 들어갑니다. 가입/로그인 구분이 없습니다.
+ *  - 그래서 같은 이름·비번을 아는 사람끼리 셀러 하나를 같이 씁니다(부부 공유).
+ *  - 셀러가 다르면 서로의 와인이 보이지 않습니다(소유자 컬럼으로 분리).
+ *  - 맨 처음 만든 셀러가 기존에 쌓여 있던(소유자 없는) 와인을 넘겨받습니다.
+ *  - 비번은 솔트 + SHA-256 반복 해시로 저장하며, 원문은 어디에도 남지 않습니다.
  */
 
-var NEW_COLUMNS = ['어울리는잔', '서빙방법', '와인배경', '평점', '한줄평', '함께한음식', '라벨사진'];
+var NEW_COLUMNS = ['어울리는잔', '서빙방법', '와인배경', '평점', '한줄평', '함께한음식', '라벨사진', '소유자'];
 var PHOTO_FOLDER_NAME = '와인라벨사진';
 var APP_TITLE = '와인 딸까 말까';
 var ICON_FILE_NAME = '와인앱아이콘.png';
@@ -42,13 +48,12 @@ function doGet(e) {
   ensureSetup_();
   var raw = HtmlService.createHtmlOutputFromFile('Index').getContent();
 
-  // 주소에 ?k=PIN 이 붙어 있으면 잠금 화면을 건너뛴다.
+  // 주소에 ?t=토큰 이 붙어 있으면 그대로 로그인 상태로 연다.
   // Apps Script는 화면을 매번 다른 googleusercontent 주소로 서빙해서 브라우저
   // 저장소가 남지 않는다. 그래서 "로그인 기억"은 주소가 담당한다.
-  var pin = prop_('WINE_PIN');
-  var key = (e && e.parameter) ? e.parameter.k : '';
-  if (pin && key && String(key) === String(pin)) {
-    raw = raw.replace('/*UNLOCKED*/false', 'true');
+  var token = (e && e.parameter) ? e.parameter.t : '';
+  if (token && verifyToken_(token)) {
+    raw = raw.replace("'/*TOKEN*/'", JSON.stringify(String(token)));
   }
 
   var out = HtmlService.createHtmlOutput(raw)
@@ -99,12 +104,10 @@ function setupIcon() {
  */
 function checkSetup() {
   var lines = [];
-  var pin = prop_('WINE_PIN');
   var sheetId = prop_('SHEET_ID');
   var gem = prop_('GEMINI_API_KEY');
   var icon = prop_('ICON_URL');
 
-  lines.push('WINE_PIN        : ' + (pin ? '설정됨 (' + String(pin).length + '자리)' : '❌ 없음'));
   lines.push('GEMINI_API_KEY  : ' + (gem ? '설정됨' : '없음 (사진 인식/AI 추천만 못 씀)'));
   lines.push('SHEET_ID        : ' + (sheetId ? sheetId : '없음 (시트에 붙인 방식이면 정상)'));
 
@@ -204,24 +207,231 @@ function prop_(key) {
   return PropertiesService.getScriptProperties().getProperty(key);
 }
 
-/** PIN 확인 (공유 로그인) */
-function checkPin(pin) {
-  var real = prop_('WINE_PIN');
-  return !!real && String(pin) === String(real);
+/* ===================== 계정 ===================== */
+
+var USER_SHEET = '사용자';
+var USER_COLUMNS = ['아이디', '이름', '비번해시', '솔트', '가입일', '마지막로그인'];
+var OWNER_COLUMN = '소유자';
+var HASH_ROUNDS = 1000;
+var TOKEN_DAYS = 365;
+
+/** 사용자 시트 (없으면 만든다) */
+function userSheet_() {
+  var ss = getSS_();
+  var sh = ss.getSheetByName(USER_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(USER_SHEET);
+    sh.getRange(1, 1, 1, USER_COLUMNS.length).setValues([USER_COLUMNS]);
+    sh.hideSheet();
+  }
+  return sh;
 }
 
-/** 전체 와인 목록 조회 */
-function getWines() {
+function userRows_() {
+  var sh = userSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var values = sh.getRange(2, 1, last - 1, USER_COLUMNS.length).getValues();
+  return values.map(function (r, i) {
+    var o = { rowIndex: i + 2 };
+    USER_COLUMNS.forEach(function (c, j) { o[c] = r[j]; });
+    return o;
+  });
+}
+
+function findUser_(id) {
+  var target = String(id || '').trim().toLowerCase();
+  if (!target) return null;
+  var rows = userRows_();
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i]['아이디']).trim().toLowerCase() === target) return rows[i];
+  }
+  return null;
+}
+
+function randomHex_(bytes) {
+  var out = '';
+  for (var i = 0; i < bytes; i++) {
+    out += ('0' + Math.floor(Math.random() * 256).toString(16)).slice(-2);
+  }
+  return out;
+}
+
+/**
+ * 비번 해시. Apps Script에는 bcrypt가 없어서 솔트 + SHA-256 반복으로 대신한다.
+ * 평문이나 단순 해시보다 무차별 대입에 훨씬 오래 버틴다.
+ */
+function hashPw_(pw, salt) {
+  var cur = salt + '|' + pw;
+  for (var i = 0; i < HASH_ROUNDS; i++) {
+    cur = Utilities.base64Encode(
+      Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, cur, Utilities.Charset.UTF_8)
+    );
+  }
+  return cur;
+}
+
+/** 토큰 서명용 비밀키 (없으면 만들어 저장) */
+function authSecret_() {
+  var props = PropertiesService.getScriptProperties();
+  var s = props.getProperty('AUTH_SECRET');
+  if (!s) {
+    s = randomHex_(32);
+    props.setProperty('AUTH_SECRET', s);
+  }
+  return s;
+}
+
+function sign_(payload) {
+  return Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(payload, authSecret_())
+  );
+}
+
+/**
+ * 서명된 토큰. 서버에 세션을 따로 저장하지 않아도 위조를 막을 수 있다.
+ * 이 환경은 브라우저 저장소가 안 남아서 토큰이 주소(?t=)에 실려 다닌다.
+ */
+function makeToken_(userId) {
+  var exp = Date.now() + TOKEN_DAYS * 24 * 60 * 60 * 1000;
+  var payload = userId + '|' + exp;
+  return Utilities.base64EncodeWebSafe(payload + '|' + sign_(payload));
+}
+
+function verifyToken_(token) {
+  if (!token) return null;
+  try {
+    var raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(String(token))).getDataAsString();
+    var parts = raw.split('|');
+    if (parts.length !== 3) return null;
+    var payload = parts[0] + '|' + parts[1];
+    if (sign_(payload) !== parts[2]) return null;
+    if (Number(parts[1]) < Date.now()) return null;
+    return parts[0];
+  } catch (err) {
+    return null;
+  }
+}
+
+/** 토큰에서 사용자를 꺼낸다. 유효하지 않으면 예외. 모든 데이터 함수의 첫 관문. */
+function requireUser_(token) {
+  var id = verifyToken_(token);
+  if (!id) throw new Error('로그인이 필요해요');
+  var user = findUser_(id);
+  if (!user) throw new Error('계정을 찾을 수 없어요');
+  return user;
+}
+
+/** 이름을 조회 키로 정규화 (대소문자·앞뒤 공백 무시 → 같은 셀러로 들어가게) */
+function normName_(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * 셀러 입장. 회원가입과 로그인이 하나다.
+ *  - 처음 보는 이름이면 셀러를 새로 만든다
+ *  - 이미 있는 이름이면 비번을 확인하고 그 셀러로 들어간다
+ * 그래서 같은 이름·비번을 아는 사람끼리 하나의 셀러를 같이 쓴다.
+ */
+function enter(name, pw) {
+  var display = String(name || '').trim();
+  pw = String(pw || '');
+  var key = normName_(display);
+
+  if (key.length < 2) return { error: '이름은 2자 이상이어야 해요' };
+  if (pw.length < 4) return { error: '비밀번호는 4자 이상이어야 해요' };
+
+  var existing = findUser_(key);
+  if (existing) {
+    if (hashPw_(pw, existing['솔트']) !== existing['비번해시']) {
+      return { error: '비밀번호가 맞지 않아요' };
+    }
+    userSheet_().getRange(existing.rowIndex, USER_COLUMNS.indexOf('마지막로그인') + 1).setValue(todayStr_());
+    return { ok: true, token: makeToken_(key), name: String(existing['이름']), created: false };
+  }
+
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (err) {
+    return { error: '잠시 후 다시 시도해주세요' };
+  }
+  try {
+    // 잠금을 잡는 사이에 누가 먼저 만들었을 수 있다
+    var again = findUser_(key);
+    if (again) {
+      if (hashPw_(pw, again['솔트']) !== again['비번해시']) return { error: '비밀번호가 맞지 않아요' };
+      return { ok: true, token: makeToken_(key), name: String(again['이름']), created: false };
+    }
+
+    var isFirst = userRows_().length === 0;
+    var salt = randomHex_(16);
+    userSheet_().appendRow([key, display, hashPw_(pw, salt), salt, todayStr_(), todayStr_()]);
+
+    // 첫 셀러라면 소유자가 비어 있던 기존 와인을 넘겨받는다
+    var moved = isFirst ? claimOrphanWines_(key) : 0;
+
+    return { ok: true, token: makeToken_(key), name: display, created: true, moved: moved };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** 소유자가 비어 있는 와인 행을 지정한 셀러로 넘긴다 */
+function claimOrphanWines_(id) {
+  var sheet = getSheet_();
+  var last = sheet.getLastRow();
+  if (last < 2) return 0;
+
+  var col = colIndex1_(getHeaders_(), OWNER_COLUMN);
+  var range = sheet.getRange(2, col, last - 1, 1);
+  var values = range.getValues();
+  var count = 0;
+  for (var i = 0; i < values.length; i++) {
+    if (!String(values[i][0]).trim()) {
+      values[i][0] = id;
+      count++;
+    }
+  }
+  if (count) range.setValues(values);
+  return count;
+}
+
+/** 토큰이 아직 쓸 만한지 확인 (앱 시작 때) */
+function checkToken(token) {
+  try {
+    var user = requireUser_(token);
+    return { ok: true, name: String(user['이름']), id: String(user['아이디']) };
+  } catch (err) {
+    return { ok: false };
+  }
+}
+
+/** 가입한 사람이 있는지 (없으면 첫 화면을 회원가입으로 연다) */
+function hasAnyUser() {
+  try {
+    return userRows_().length > 0;
+  } catch (err) {
+    return true;
+  }
+}
+
+/** 내 와인 목록만 조회 */
+function getWines(token) {
+  var me = String(requireUser_(token)['아이디']);
   var sheet = getSheet_();
   var lastRow = sheet.getLastRow();
   var headers = getHeaders_();
   if (lastRow < 2) return { headers: headers, wines: [] };
 
   var values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  var ownerIdx = headers.indexOf(OWNER_COLUMN);
   var tz = Session.getScriptTimeZone() || 'Asia/Seoul';
   var wines = [];
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
+    // 남의 와인은 아예 내려보내지 않는다
+    if (ownerIdx !== -1 && String(row[ownerIdx]).trim() !== me) continue;
     var obj = { rowIndex: i + 2 };
     for (var c = 0; c < headers.length; c++) {
       var v = row[c];
@@ -232,8 +442,21 @@ function getWines() {
   return { headers: headers, wines: wines };
 }
 
+/** 이 행이 정말 내 것인지 확인하고 시트를 돌려준다 (행 번호를 바꿔치기한 요청 차단) */
+function requireOwnedRow_(me, rowIndex) {
+  var sheet = getSheet_();
+  rowIndex = Number(rowIndex);
+  if (!rowIndex || rowIndex < 2 || rowIndex > sheet.getLastRow()) throw new Error('없는 와인이에요');
+  var col = colIndex1_(getHeaders_(), OWNER_COLUMN);
+  if (String(sheet.getRange(rowIndex, col).getValue()).trim() !== me) {
+    throw new Error('내 와인이 아니에요');
+  }
+  return sheet;
+}
+
 /** 새 와인 추가 (상태=보유, 등록일=오늘 자동). photoDataUrl은 선택. */
-function addWine(data, photoDataUrl) {
+function addWine(token, data, photoDataUrl) {
+  var me = String(requireUser_(token)['아이디']);
   var sheet = getSheet_();
   var headers = getHeaders_();
   var photoUrl = '';
@@ -245,6 +468,7 @@ function addWine(data, photoDataUrl) {
     if (h === '등록일') return todayStr_();
     if (h === '마신날짜') return '';
     if (h === '라벨사진') return photoUrl;
+    if (h === OWNER_COLUMN) return me;
     return (data && data[h]) || '';
   });
   sheet.appendRow(row);
@@ -314,7 +538,8 @@ var WINE_FIELDS_SPEC = '{"와인명":"","종류":"레드/화이트/스파클링/
  * 라벨 사진 1장 → 와인 1병 정보 추출.
  * 반환: { 와인명, 종류, 품종, 생산지_국가, 빈티지 }
  */
-function recognizeLabel(photoDataUrl) {
+function recognizeLabel(token, photoDataUrl) {
+  requireUser_(token);
   var prompt = '이 사진은 와인 라벨입니다. 아래 JSON 형식으로만 답하세요.\n' +
     WINE_FIELDS_SPEC + '\n' +
     '라벨에서 읽을 수 없는 항목은 빈 문자열로 두세요. ' +
@@ -327,7 +552,8 @@ function recognizeLabel(photoDataUrl) {
  * 이미 시트에 있는 와인은 existingRowIndex를 채워서 중복 추가를 막는다.
  * 반환: [{ 와인명, 종류, 품종, 생산지_국가, 빈티지, existingRowIndex }]
  */
-function recognizeCellar(photoDataUrl) {
+function recognizeCellar(token, photoDataUrl) {
+  requireUser_(token);
   var prompt = '이 사진은 와인 셀러(또는 와인 여러 병이 놓인 선반) 사진입니다. ' +
     '사진에서 식별 가능한 와인 병을 모두 찾아 JSON 배열로만 답하세요.\n' +
     '[' + WINE_FIELDS_SPEC + ']\n' +
@@ -340,7 +566,7 @@ function recognizeCellar(photoDataUrl) {
   // 모델이 배열 대신 {wines:[...]} 로 감싸 주는 경우 대비
   var list = Array.isArray(result) ? result : (result.wines || result.list || []);
 
-  var existing = getWines().wines;
+  var existing = getWines(token).wines;
   list.forEach(function (cand) {
     var match = findExisting_(existing, cand['와인명']);
     cand.existingRowIndex = match ? match.rowIndex : null;
@@ -364,7 +590,8 @@ function findExisting_(wines, name) {
 }
 
 /** 셀러 인식 결과 중 선택한 것들을 한 번에 추가 */
-function addWines(list) {
+function addWines(token, list) {
+  var me = String(requireUser_(token)['아이디']);
   if (!list || !list.length) return { added: 0 };
   var sheet = getSheet_();
   var headers = getHeaders_();
@@ -376,6 +603,7 @@ function addWines(list) {
       if (h === '등록일') return today;
       if (h === '마신날짜') return '';
       if (h === '생산지/국가') return c['생산지_국가'] || c['생산지/국가'] || '';
+      if (h === OWNER_COLUMN) return me;
       return c[h] || '';
     });
   });
@@ -384,8 +612,9 @@ function addWines(list) {
 }
 
 /** 마심 표시: 상태→마심, 마신날짜/평점/한줄평/함께한음식 기록 */
-function markDrunk(rowIndex, info) {
-  var sheet = getSheet_();
+function markDrunk(token, rowIndex, info) {
+  var me = String(requireUser_(token)['아이디']);
+  var sheet = requireOwnedRow_(me, rowIndex);
   var headers = getHeaders_();
   sheet.getRange(rowIndex, colIndex1_(headers, '상태')).setValue('마심');
   sheet.getRange(rowIndex, colIndex1_(headers, '마신날짜')).setValue(todayStr_());
@@ -398,8 +627,9 @@ function markDrunk(rowIndex, info) {
 }
 
 /** 마심 취소(되돌리기) */
-function unmarkDrunk(rowIndex) {
-  var sheet = getSheet_();
+function unmarkDrunk(token, rowIndex) {
+  var me = String(requireUser_(token)['아이디']);
+  var sheet = requireOwnedRow_(me, rowIndex);
   var headers = getHeaders_();
   sheet.getRange(rowIndex, colIndex1_(headers, '상태')).setValue('보유');
   sheet.getRange(rowIndex, colIndex1_(headers, '마신날짜')).setValue('');
@@ -409,11 +639,11 @@ function unmarkDrunk(rowIndex) {
 /**
  * 품종/종류 키워드로 "이미 마신" 와인 조회 (추가할 때 비교용)
  */
-function getDrunkMatches(keyword) {
+function getDrunkMatches(token, keyword) {
   if (!keyword) return [];
   keyword = String(keyword).trim();
   if (!keyword) return [];
-  var data = getWines();
+  var data = getWines(token);
   return data.wines.filter(function (w) {
     if (w['상태'] !== '마심') return false;
     var 품종 = String(w['품종'] || '');
@@ -428,11 +658,12 @@ function getDrunkMatches(keyword) {
  * API 실패 시 키워드 매칭으로 자동 대체.
  * 반환: [{ wine, reason }]
  */
-function recommendByFood(food) {
+function recommendByFood(token, food) {
+  requireUser_(token);
   food = String(food || '').trim();
   if (!food) return [];
 
-  var owned = getWines().wines.filter(function (w) { return w['상태'] === '보유'; });
+  var owned = getWines(token).wines.filter(function (w) { return w['상태'] === '보유'; });
   if (!owned.length) return [];
 
   try {
@@ -492,8 +723,8 @@ function recommendByKeyword_(food, owned) {
 }
 
 /** 소비 통계: 월별 / 종류별 / 가격대별 마신 와인 집계 */
-function getStats() {
-  var data = getWines();
+function getStats(token) {
+  var data = getWines(token);
   var drunk = data.wines.filter(function (w) { return w['상태'] === '마심'; });
 
   var byMonth = {}, byType = {}, byPrice = {};
