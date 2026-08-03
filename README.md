@@ -1,13 +1,19 @@
 # DKMK — 우리집 와인 셀러
 
-나와 아내가 같이 쓰는 와인 셀러 관리 모바일 웹앱. 별도 서버 없이 **Google Apps Script + Google Sheets**만으로 동작하고, 안드로이드·아이폰 모두 브라우저에서 열어 홈 화면에 추가하면 앱처럼 쓸 수 있습니다.
+나와 아내가 같이 쓰는 와인 셀러 관리 모바일 웹앱. **GitHub Pages(정적 프런트) + Google Apps Script(JSON API) + Google Sheets(DB)** 구조로 동작하고, 안드로이드·아이폰 모두 브라우저에서 열어 홈 화면에 추가하면 앱처럼 쓸 수 있습니다.
 
 ## 구조
 
+이 앱은 온그린(같은 계정의 골프 스코어카드 앱)과 똑같은 방식으로 나뉘어 있습니다 — 화면은 GitHub Pages가 정적으로 서빙하고, Apps Script는 순수 JSON API로만 동작합니다.
+
 | 파일 | 역할 |
 |---|---|
-| `Code.gs` | Apps Script 백엔드. 시트 읽기/쓰기, 사진 인식(Gemini), 마심 기록, 추천, 통계 |
-| `Index.html` | 모바일 프런트엔드 전체(HTML+CSS+JS 단일 파일). `HtmlService`가 그대로 서빙 |
+| `index.html` | 6개 화면(로그인·셀러·추천·추가·기록)의 정적 마크업 |
+| `api.js` | 통신 담당. 전역 `API` 객체가 `fetch()`로 Apps Script를 호출(GET은 쿼리스트링, POST는 `text/plain` 바디 — 둘 다 CORS 사전 요청 없이 통과) |
+| `app.js` | 화면 로직 전체. 로그인 판단, 렌더링, `callAPI(() => API.xxx())` 형태로 API 호출 결과 처리 |
+| `style.css` | 다크 테마 스타일 |
+| `manifest.json` + `icon-*.png` | PWA 매니페스트·아이콘. 정적 사이트라 진짜 매니페스트를 쓸 수 있습니다 |
+| `Code.gs` | Apps Script 백엔드. `doGet`/`doPost`가 `action` 이름으로 라우팅만 하고, 시트 읽기/쓰기·사진 인식(Gemini)·마심 기록·추천·통계는 각 함수가 처리 |
 
 DB는 기존 "와인리스트" 구글 스프레드시트를 그대로 씁니다. 빌드 도구·패키지 매니저 없음.
 
@@ -39,74 +45,70 @@ DB는 기존 "와인리스트" 구글 스프레드시트를 그대로 씁니다.
 
 ## 배포 방법
 
-방법은 두 가지이고, 코드는 둘 다 그대로 동작합니다.
+두 부분을 각각 배포합니다 — Apps Script(API)와 GitHub Pages(화면). 순서를 지켜야 합니다: API 먼저 배포해서 주소를 받고, 그 주소를 화면 쪽에 넣어야 합니다.
 
-### A. 한 파일로 (권장 — 가장 단순)
+### 1. 백엔드(Apps Script) 배포
 
-파일을 하나만 붙여넣습니다. HTML 파일을 따로 만들 필요가 없어서, 시트 메뉴나 편집기 UI를 찾을 필요가 없습니다.
-
-1. https://script.google.com → **새 프로젝트**
-2. [`AllInOne.gs`](AllInOne.gs) 전체 복사 → 기본 코드를 지우고 붙여넣기 → 저장
-3. **⚙️ 프로젝트 설정 → 스크립트 속성** 3개 추가
-   - `SHEET_ID` — 시트 주소 `docs.google.com/spreadsheets/d/`**`이부분`**`/edit`
+1. "와인리스트" 스프레드시트 → **확장 프로그램 → Apps Script** (또는 새 프로젝트를 만들고 스크립트 속성에 `SHEET_ID`를 추가해도 됩니다)
+2. [`Code.gs`](Code.gs) 전체 내용을 붙여넣기 → 저장
+3. **⚙️ 프로젝트 설정 → 스크립트 속성**에 추가
    - `GEMINI_API_KEY` — https://aistudio.google.com/apikey 에서 무료 발급
-
-### B. 시트에 붙이기 (파일 2개)
-
-1. "와인리스트" 스프레드시트 → **확장 프로그램 → Apps Script**
-2. `Code.gs` 붙여넣기 + HTML 파일을 추가해 이름을 정확히 **`Index`**로 하고 `Index.html` 붙여넣기
-3. 스크립트 속성에 `GEMINI_API_KEY` 추가 (`SHEET_ID`는 불필요)
-
-### 공통 (A·B 모두)
-4. (자동) 첫 접속 때 컬럼 추가와 아이콘 등록이 알아서 됩니다. 실패하면 `checkSetup`을 실행해 원인을 확인하고, `setup`으로 다시 시도할 수 있습니다.
-5. **배포 → 새 배포 → 웹 앱**
+   - `SHEET_ID` — 새 프로젝트로 만들었을 때만. 시트 주소 `docs.google.com/spreadsheets/d/`**`이부분`**`/edit`
+4. **배포 → 새 배포 → 웹 앱**
    - 실행 계정: 나
-   - 액세스: **링크가 있는 모든 사용자** ← 셀러 이름·비번이 로그인 역할을 하므로, 이렇게 해야 아내 폰에서 구글 로그인 없이 열립니다
-6. 배포 URL을 폰에서 열고 홈 화면에 추가
+   - 액세스: **모든 사용자** ← GitHub Pages에서 구글 로그인 없이 `fetch`가 통과해야 하고, 이 앱 자체의 셀러 이름·비번이 로그인 역할을 대신합니다
+5. 나온 **웹 앱 URL**(`https://script.google.com/macros/s/AKfycb.../exec` 형태)을 복사해둡니다
+6. 첫 요청 때 시트 컬럼 설정이 자동으로 끝납니다. 실패하면 Apps Script 편집기에서 `checkSetup`을 실행해 원인을 확인하고 `setup`으로 다시 시도할 수 있습니다
+
+이후 `Code.gs`를 고칠 때마다: **배포 관리 → 연필(수정) → 버전: 새 버전 → 배포**를 눌러야 합니다 (이렇게 해야 URL이 그대로 유지됩니다. **새 배포**를 다시 누르면 URL이 바뀌어서 6번부터 다시 해야 합니다).
+
+### 2. 프런트엔드(GitHub Pages) 배포
+
+1. [`api.js`](api.js) 맨 위 `API.URL`에 1번에서 받은 웹 앱 URL을 붙여넣고 커밋
+2. 이 저장소의 GitHub 설정 → **Pages** → Source를 배포할 브랜치(`main`)의 루트로 지정
+3. 몇 분 후 `https://<계정>.github.io/<저장소>/` 주소로 접속됩니다
+4. 폰에서 그 주소를 열고 이름·비밀번호(4자리 숫자)를 넣으면 셀러가 만들어집니다
+5. 홈 화면에 추가
    - 아이폰: **사파리**로 열기 → 공유 `↑` → 홈 화면에 추가
-   - 안드로이드: **크롬**으로 열기 → `⋮` → 홈 화면에 추가
-
-## 코드 수정할 때
-
-`AllInOne.gs`는 **자동 생성 파일이라 직접 고치지 않습니다.** `Code.gs` / `Index.html`을 고친 뒤 아래를 실행해 다시 만드세요.
-
-```bash
-node build_single.js
-```
+   - 안드로이드: **크롬**으로 열기 → `⋮` → 홈 화면에 추가 (또는 앱 설치)
+   - 앱 안의 "홈 화면에 추가" 버튼을 누르면 기기에 맞는 안내가 뜹니다
 
 ## 검증
 
-브라우저 자동화(Playwright)로 검증합니다.
+브라우저 자동화(Playwright)로 검증합니다. `harness.js`가 `window.fetch`를 가짜 서버(`mock.js`)로 바꿔치기한 테스트 페이지를 만들고, 나머지 스크립트가 실제 `index.html`/`api.js`/`app.js`를 그 페이지에서 그대로 실행해 검증합니다.
 
-- `run.js` — 42개: 입장, 목록/검색, 상세, 마시기, 되돌리기, 셀러 다중 인식, 일괄 등록, 라벨 인식, 음식 세분화 메뉴, 페어링 직접 매칭, 품종별 통계(블렌드 분리, % 제거), 렌더링 이스케이프
-- `auth_test.js` — 36개: 셀러 생성/입장, 공유(같은 이름·비번), 비번 오류, 셀러 간 데이터 분리, 남의 행 수정 차단, 무효 토큰 차단, 자동 입장
-- `install_test.js` — 21개: 기기별(아이폰·안드로이드·PC) 홈 화면 추가 안내, 공유 주소에 토큰이 안 섞이는지
+- `run.js` — 로그인, 목록/검색, 상세, 마시기, 되돌리기, 셀러 다중 인식, 일괄 등록, 라벨 인식, 음식 세분화 메뉴, 페어링 직접 매칭, 품종별 통계(블렌드 분리, % 제거), 렌더링 이스케이프
+- `auth_test.js` — 셀러 생성/입장, 공유(같은 이름·비번), 비번 오류, 셀러 간 데이터 분리, 남의 행 수정 차단, 무효 토큰 차단, 자동 입장(localStorage)
+- `install_test.js` — 기기별(아이폰·안드로이드·PC) 홈 화면 추가 안내, 공유 주소에 로그인 정보가 안 섞이는지
+- `overflow_check.js` — 320px 좁은 화면에서 가로 스크롤 없는지
 
 ```bash
-node harness.js   # google.script.run을 가짜 시트로 대체한 테스트 페이지 생성
-node run.js       # 실제 브라우저에서 시나리오 실행 + 스크린샷
-node auth_test.js # 셀러/권한 분리 검증
-node install_test.js # 홈 화면 추가 안내 / 공유 검증
+node harness.js       # fetch를 가짜 서버로 대체한 테스트 페이지 생성
+node run.js            # 실제 브라우저에서 시나리오 실행 + 스크린샷
+node auth_test.js      # 셀러/권한 분리 검증
+node install_test.js   # 홈 화면 추가 안내 / 공유 검증
+node overflow_check.js # 좁은 화면 가로 넘침 검증
 ```
 
 ## 백엔드 API
 
-| 함수 | 설명 |
+`doGet`(조회)과 `doPost`(변경)가 모두 `action` 파라미터로 아래 함수에 라우팅됩니다. 응답은 항상 JSON입니다.
+
+| action | 설명 |
 |---|---|
-| `enter(name, pw)` | 셀러 입장 — 없으면 만들고, 있으면 비번 확인 |
-| `checkToken(token)` | 저장된 토큰이 아직 유효한지 |
-| `getWines(token)` | 내 셀러 목록만 |
-| `addWine(token, data, photo)` | 한 병 추가 (사진은 Drive 저장) |
-| `addWines(token, list)` | 여러 병 일괄 추가 |
-| `markDrunk(token, row, info)` | 마심 기록(평점·한줄평·음식) |
-| `unmarkDrunk(token, row)` | 되돌리기 |
-| `recognizeLabel(token, photo)` | 라벨 1병 인식 |
-| `recognizeCellar(token, photo)` | 셀러 사진에서 여러 병 인식 + 중복 표시 |
-| `recommendByFood(token, food)` | 음식 → 보유 와인 추천. 셀러 페어링 정보와 직접 일치하면 matched:true (AI, 실패 시 키워드) |
-| `getStats(token)` | 소비 통계 |
-| `getAppUrl()` | 배포된 웹 앱 주소 (홈 화면 추가 안내용) |
-| `setup()` | 설정을 수동으로 다시 실행 |
-| `checkSetup()` | 속성·시트·컬럼·아이콘·배포 상태 점검 |
+| `enter` (name, pw) | 셀러 입장 — 없으면 만들고, 있으면 비번 확인. 토큰 반환 |
+| `checkToken` (token) | 저장된 토큰이 아직 유효한지 |
+| `getWines` (token) | 내 셀러 목록만 |
+| `addWine` (token, data, photo) | 한 병 추가 (사진은 Drive 저장) |
+| `addWines` (token, list) | 여러 병 일괄 추가 |
+| `markDrunk` (token, row, info) | 마심 기록(평점·한줄평·음식) |
+| `unmarkDrunk` (token, row) | 되돌리기 |
+| `recognizeLabel` (token, photo) | 라벨 1병 인식 |
+| `recognizeCellar` (token, photo) | 셀러 사진에서 여러 병 인식 + 중복 표시 |
+| `recommendByFood` (token, food) | 음식 → 보유 와인 추천. 셀러 페어링 정보와 직접 일치하면 matched:true (AI, 실패 시 키워드) |
+| `getStats` (token) | 소비 통계 |
+
+Apps Script 편집기에서 직접 실행하는 관리용 함수도 있습니다: `setup()`(설정 재실행), `checkSetup()`(속성·시트·컬럼 상태 점검).
 
 ## 셀러(계정)
 
@@ -121,28 +123,22 @@ node install_test.js # 홈 화면 추가 안내 / 공유 검증
 
 맨 처음 만든 셀러가 기존에 쌓여 있던(소유자 없는) 와인을 넘겨받습니다.
 
-비밀번호는 **4자리 숫자**로 고정했습니다(온그린 PIN과 같은 방식). 입력창은 숫자만 받고 자동으로 4자리에서 멈춥니다. 솔트 + SHA-256 1000회 반복 해시로 저장하지만, 4자리 숫자다 보니 무차별 대입에 대한 여유는 크지 않습니다 — 어차피 iframe이 붙은 이 앱 URL 자체가 외부에 안 알려진 것이 실질적인 방어선입니다.
+비밀번호는 **4자리 숫자**로 고정했습니다(온그린 PIN과 같은 방식). 입력창은 숫자만 받고 자동으로 4자리에서 멈춥니다. 솔트 + SHA-256 1000회 반복 해시로 저장하지만, 4자리 숫자다 보니 무차별 대입에 대한 여유는 크지 않습니다 — 어차피 이 앱 주소 자체가 검색엔진에 노출되지 않는 개인용 GitHub Pages 주소인 것이 실질적인 방어선입니다.
 
 ## 로그인 유지
 
-`localStorage`는 쓰지 않습니다. Apps Script는 화면을 `n-XXXXXXXX-...googleusercontent.com` iframe으로 서빙하는데 **이 하위 도메인이 접속마다 바뀌어서**, 브라우저가 매번 다른 사이트로 보고 저장한 값을 찾지 못합니다. 아이폰은 서드파티 저장소를 기본 차단하기까지 합니다.
+GitHub Pages는 주소가 고정된 정적 사이트라 `localStorage`가 정상적으로 동작합니다. 로그인에 성공하면 `api.js`가 토큰을 `localStorage`(`dkmk_token` 키)에 저장하고, 다음 방문 때 `checkToken`으로 유효성만 확인한 뒤 바로 셀러를 엽니다. 주소에 토큰을 실어 나르는 요령이 필요 없습니다.
 
-그래서 토큰을 주소가 들고 다닙니다. 토큰은 `셀러키|만료|HMAC서명`을 base64url로 묶은 것이라 서버에 세션을 저장하지 않아도 위조를 막습니다. `doGet(e)`이 `?t=` 값을 검증해 통과하면 HTML의 토큰 자리에 심어서 내려줍니다.
-
-입장에 성공하면 앱이 `?t=` 주소로 여는 버튼을 띄웁니다(`target="_top"`이라 바깥 창째 이동). 그 화면에서 홈 화면에 추가하면 다음부터 자동으로 들어갑니다.
+(예전에는 Apps Script `HtmlService`가 매 접속마다 바뀌는 `n-XXXXXXXX-...googleusercontent.com` iframe 주소로 화면을 서빙했기 때문에 `localStorage`가 저장되지 않아, 토큰을 주소(`?t=`)에 실어 나르는 방식을 썼습니다. GitHub Pages로 옮기면서 이 요령이 통째로 필요 없어졌습니다.)
 
 ## 홈 화면 추가 · 공유
 
-기기를 알아서 판별해 안내가 달라집니다(아이폰은 사파리 공유 버튼, 안드로이드는 크롬 `⋮`, PC는 주소창 설치 아이콘). 프로그램이 대신 눌러줄 수는 없습니다 — 아이폰은 홈 화면 추가 API 자체가 없고, 안드로이드의 설치 프롬프트는 최상위 페이지에서만 뜨는데 우리 화면은 iframe 안이기 때문입니다.
+기기를 알아서 판별해 안내가 달라집니다(아이폰은 사파리 공유 버튼, 안드로이드는 크롬 `⋮`, PC는 주소창 설치 아이콘). 이 페이지 자체가 최상위 주소(iframe 아님)라 브라우저 기본 안내만 보여주면 되고, 서버 호출도 필요 없습니다.
 
-안내의 **내 주소로 열기**는 `?t=` 토큰이 붙은 주소를 `target="_top"`으로 엽니다. 그 상태에서 홈 화면에 추가해야 바로가기가 토큰을 물고 가서 다음부터 자동으로 들어갑니다.
-
-**앱 공유는 토큰이 빠진 기본 주소를 보냅니다.** 토큰 주소를 공유하면 받은 사람이 비밀번호 없이 셀러에 들어오기 때문입니다. 받은 사람은 이름·비번을 알아야 들어올 수 있습니다. `navigator.share`가 iframe 안에서 막히면 클립보드 복사로, 그마저 막히면 안내 문구로 단계적으로 내려갑니다.
+**앱 공유는 로그인 정보가 없는 순수 페이지 주소**(`location.origin + location.pathname`)를 보냅니다. 로그인은 `localStorage`에만 있고 주소에는 없으므로, 받은 사람은 이름·비번을 알아야 셀러에 들어올 수 있습니다. `navigator.share`가 없거나 막히면 클립보드 복사로 대체합니다.
 
 ## 홈 화면 아이콘
 
-Apps Script는 우리 페이지를 iframe으로 감싸서 서빙합니다. 그래서 `Index.html` 안의 `<link rel="apple-touch-icon">`은 폰이 보지 못하고, 홈 화면에 추가하면 구글 기본 아이콘("G")이 잡힙니다.
+정적 사이트라 `index.html`의 `<link rel="manifest">`/`<link rel="apple-touch-icon">`을 브라우저가 그대로 읽습니다. `manifest.json` + `icon-192.png`/`icon-512.png`/`icon-180.png`만 저장소에 있으면 되고, 별도 설정이 필요 없습니다.
 
-해결책은 **바깥 페이지의 파비콘을 바꾸는 것**입니다. `setupIcon()`이 512px 와인잔 PNG를 드라이브에 올려 공개 URL로 만들고, `doGet()`이 그 주소를 `setFaviconUrl()`에 넘깁니다.
-
-아이콘을 바꾼 뒤에는 **폰의 기존 바로가기를 지우고 다시 추가**해야 합니다. 한 번 만들어진 바로가기의 아이콘은 갱신되지 않습니다.
+(예전에는 Apps Script가 페이지를 iframe으로 감싸서 서빙해 이 태그들을 브라우저가 보지 못했기 때문에, Drive에 아이콘을 올려 공개 URL을 만들고 `setFaviconUrl()`로 바깥 페이지의 파비콘을 바꾸는 우회가 필요했습니다. GitHub Pages로 옮기면서 이 우회도 필요 없어졌습니다.)

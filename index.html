@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>와인 딸까 말까</title>
+
+  <!-- 홈 화면에 추가했을 때 앱처럼 보이도록. 이 페이지 자체가 정적 사이트라
+       진짜 PWA 매니페스트/아이콘을 쓸 수 있다 (Apps Script iframe 시절엔 못 썼음) -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="theme-color" content="#8C1D33">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="와인">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="pinScreen">
+    <div class="glass"></div>
+    <div class="t">와인 딸까 말까</div>
+
+    <form class="auth-form" onsubmit="submitAuth(event)">
+      <input id="authId" placeholder="셀러 이름" autocomplete="username" autocapitalize="none" spellcheck="false">
+      <input id="authPw" type="password" placeholder="비밀번호 4자리 숫자" autocomplete="current-password"
+        inputmode="numeric" pattern="[0-9]*" maxlength="4" oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)">
+      <button id="authBtn" type="submit">시작하기</button>
+    </form>
+    <div id="pinErr"></div>
+    <div class="auth-hint">처음 쓰는 이름이면 셀러가 새로 만들어져요. 같은 이름·비밀번호를 넣으면 둘이 같은 셀러를 봅니다.</div>
+  </div>
+
+  <header>
+    <div class="row">
+      <h1 id="pgTitle">셀러</h1>
+      <span class="count" id="pgCount"></span>
+    </div>
+    <div id="bookmarkTip"></div>
+  </header>
+
+  <main>
+    <!-- 셀러 -->
+    <div id="pgCellar" class="page on">
+      <div class="seg">
+        <div class="on" data-s="보유" onclick="setSeg('보유')">보유</div>
+        <div data-s="마심" onclick="setSeg('마심')">마신 와인</div>
+      </div>
+      <div class="search"><input id="search" placeholder="와인 이름, 품종…" oninput="renderList()"></div>
+      <div id="listArea"><div class="loading">불러오는 중…</div></div>
+    </div>
+
+    <!-- 추천 -->
+    <div id="pgFood" class="page">
+      <div class="field big">
+        <input id="foodInput" placeholder="오늘 뭐 먹어요?" onkeydown="if(event.key==='Enter')doRecommend()">
+      </div>
+      <div class="chips" id="foodQuick"></div>
+      <div class="chips sub" id="foodSub"></div>
+      <button class="primary-btn" onclick="doRecommend()">어울리는 와인 찾기</button>
+      <div id="foodArea" style="margin-top:18px;"></div>
+    </div>
+
+    <!-- 추가 -->
+    <div id="pgAdd" class="page">
+      <div class="shoot">
+        <label for="photoOne">
+          <span class="ic">🍾</span>
+          <span class="t">라벨 찍기</span>
+          <span class="s">한 병</span>
+          <input type="file" id="photoOne" accept="image/*" capture="environment" onchange="onPhoto(event,'one')">
+        </label>
+        <label for="photoAll">
+          <span class="ic">📸</span>
+          <span class="t">셀러 찍기</span>
+          <span class="s">여러 병 한번에</span>
+          <input type="file" id="photoAll" accept="image/*" capture="environment" onchange="onPhoto(event,'all')">
+        </label>
+      </div>
+
+      <div id="photoPreview"></div>
+      <div id="photoNote"></div>
+
+      <!-- 셀러 인식 결과 선택 -->
+      <div id="pickArea" style="display:none;">
+        <div id="pickList"></div>
+        <button class="primary-btn" id="pickBtn" onclick="addPicked()">담기</button>
+        <button class="more-toggle" onclick="cancelPick()">취소</button>
+      </div>
+
+      <!-- 직접 입력 폼 -->
+      <form id="addForm" onsubmit="submitAdd(event)">
+        <div class="field big"><input id="f_와인명" placeholder="와인 이름" required></div>
+        <div class="chips" id="typeChips"></div>
+        <div class="duo">
+          <div class="field"><input id="f_품종" placeholder="품종" oninput="checkSimilar()"></div>
+          <div class="field"><input id="f_빈티지" placeholder="빈티지"></div>
+        </div>
+        <div class="field"><input id="f_생산지/국가" placeholder="생산지 / 국가"></div>
+        <div class="field"><input id="f_평균가격(국내·원)" placeholder="가격 (원)" inputmode="numeric"></div>
+        <div id="similarHint"></div>
+
+        <button type="button" class="more-toggle" onclick="toggleMore()"><span id="moreLabel">＋ 자세히 입력</span></button>
+        <div id="moreFields">
+          <div class="field"><textarea id="f_추천 페어링" placeholder="어울리는 음식"></textarea></div>
+          <div class="duo">
+            <div class="field"><input id="f_어울리는잔" placeholder="어울리는 잔"></div>
+            <div class="field"><input id="f_서빙방법" placeholder="서빙 온도 / 방법"></div>
+          </div>
+          <div class="field"><textarea id="f_와인배경" placeholder="와인 배경·스토리"></textarea></div>
+          <div class="field"><input id="f_평균가격(글로벌·USD)" placeholder="해외가 (USD)"></div>
+          <div class="field"><textarea id="f_메모" placeholder="메모"></textarea></div>
+        </div>
+
+        <button class="primary-btn" id="addBtn" type="submit">셀러에 넣기</button>
+      </form>
+    </div>
+
+    <!-- 기록 -->
+    <div id="pgStat" class="page">
+      <div id="statArea"><div class="loading">불러오는 중…</div></div>
+    </div>
+  </main>
+
+  <nav id="tabbar">
+    <div class="on" data-p="Cellar" onclick="showPage('Cellar')"><span class="ic">🍷</span>셀러</div>
+    <div data-p="Food" onclick="showPage('Food')"><span class="ic">🍽️</span>추천</div>
+    <div data-p="Add" onclick="showPage('Add')"><span class="ic">📸</span>추가</div>
+    <div data-p="Stat" onclick="showPage('Stat')"><span class="ic">📊</span>기록</div>
+  </nav>
+
+  <div class="modal-bg" id="detailModal" onclick="if(event.target===this) cm('detailModal')">
+    <div class="modal"><div class="grip"></div><div id="detailBody"></div></div>
+  </div>
+
+  <div class="modal-bg" id="installModal" onclick="if(event.target===this) cm('installModal')">
+    <div class="modal"><div class="grip"></div><div id="installBody"></div></div>
+  </div>
+
+  <div class="modal-bg" id="drinkModal" onclick="if(event.target===this) cm('drinkModal')">
+    <div class="modal">
+      <div class="grip"></div>
+      <h3 id="drinkTitle"></h3>
+      <div class="star-pick" id="starPick"></div>
+      <div class="field"><textarea id="drinkComment" placeholder="어땠어요?"></textarea></div>
+      <div class="field"><input id="drinkFood" placeholder="뭐랑 드셨어요?"></div>
+      <button class="primary-btn" onclick="confirmDrink()">기록하기</button>
+      <button class="more-toggle" onclick="cm('drinkModal')">닫기</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
