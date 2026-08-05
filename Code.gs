@@ -133,7 +133,16 @@ function checkSetup() {
   var sheetId = prop_('SHEET_ID');
   var gem = prop_('GEMINI_API_KEY');
 
-  lines.push('GEMINI_API_KEY  : ' + (gem ? '설정됨' : '없음 (사진 인식/AI 추천만 못 씀)'));
+  if (!gem) {
+    lines.push('GEMINI_API_KEY  : 없음 (사진 인식/AI 추천만 못 씀)');
+  } else {
+    try {
+      callGemini_([{ text: '{"ok":true} 라고만 답하세요.' }]);
+      lines.push('GEMINI_API_KEY  : 설정됨, 정상 동작 확인');
+    } catch (err) {
+      lines.push('GEMINI_API_KEY  : ❌ ' + err.message);
+    }
+  }
   lines.push('SHEET_ID        : ' + (sheetId ? sheetId : '없음 (시트에 붙인 방식이면 정상)'));
 
   try {
@@ -475,9 +484,10 @@ var GEMINI_MODEL = 'gemini-2.0-flash';
 /** Gemini 호출 후 JSON 응답을 파싱해서 반환. parts는 [{text:..}, {inline_data:..}] 형태. */
 function callGemini_(parts) {
   var apiKey = prop_('GEMINI_API_KEY');
+  if (apiKey) apiKey = apiKey.trim();
   if (!apiKey) throw new Error('GEMINI_API_KEY가 설정되지 않았어요 (스크립트 속성에 추가해주세요)');
 
-  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=' + apiKey;
+  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=' + encodeURIComponent(apiKey);
   var resp = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
@@ -489,6 +499,9 @@ function callGemini_(parts) {
   });
 
   var status = resp.getResponseCode();
+  if (status === 401 || status === 403) {
+    throw new Error('GEMINI_API_KEY가 잘못됐거나 만료됐어요. https://aistudio.google.com/apikey 에서 키를 다시 확인하고 스크립트 속성에 다시 저장한 뒤, 배포 관리 → 새 버전으로 재배포해주세요. (' + status + ')');
+  }
   if (status !== 200) {
     throw new Error('AI 호출 실패 (' + status + '): ' + resp.getContentText().slice(0, 200));
   }
