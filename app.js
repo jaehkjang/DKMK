@@ -6,7 +6,7 @@
 
 var ALL_WINES = [], SEG = '보유', PENDING_ROW = null, CURRENT_RATING = 5;
 var PHOTO_DATAURL = null, PICKS = [], PICK_ON = {}, SELECTED_TYPE = '';
-var TOKEN = '', ME = '', EDIT_ROW = null;
+var TOKEN = '', ME = '', EDIT_ROW = null, DETAIL_ROW = null;
 
 var TYPES = [
   { n:'레드',        c:'#8C1D33', s:'#F7E9EC' },
@@ -104,7 +104,51 @@ function openSettings() {
   document.getElementById('pwOld').value = '';
   document.getElementById('pwNew').value = '';
   document.getElementById('pwErr').textContent = '';
+  loadGlasses();
   om('settingsModal');
+}
+
+/* ---------- 내 잔 관리 ---------- */
+var MY_GLASSES = [];
+
+function loadGlasses() {
+  document.getElementById('glassChips').innerHTML = '<div class="loading" style="padding:8px 0">불러오는 중…</div>';
+  callAPI(function () { return API.getGlasses(); }).then(function (list) {
+    MY_GLASSES = (list && !list.error) ? list : [];
+    renderGlassChips();
+  });
+}
+
+function renderGlassChips() {
+  var el = document.getElementById('glassChips');
+  if (!MY_GLASSES.length) {
+    el.innerHTML = '<div class="note" style="margin:0">등록된 잔이 없어요</div>';
+    return;
+  }
+  el.innerHTML = MY_GLASSES.map(function (g) {
+    return '<button type="button" onclick="removeGlass(' + g.rowIndex + ')">' + esc(g['이름']) + ' ✕</button>';
+  }).join('');
+}
+
+function submitAddGlass(e) {
+  e.preventDefault();
+  var input = document.getElementById('glassNameInput');
+  var name = input.value.trim();
+  if (!name) return;
+  callAPI(function () { return API.addGlass(name); }).then(function (res) {
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
+    input.value = '';
+    loadGlasses();
+  });
+}
+
+function removeGlass(rowIndex) {
+  var g = MY_GLASSES.filter(function (x) { return x.rowIndex === rowIndex; })[0];
+  if (!g || !confirm(g['이름'] + ' 잔을 삭제할까요?')) return;
+  callAPI(function () { return API.deleteGlass(rowIndex); }).then(function (res) {
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
+    loadGlasses();
+  });
 }
 
 function submitChangePw(e) {
@@ -286,6 +330,7 @@ function cardHtml(w, extraHtml) {
 /* ---------- 상세 ---------- */
 function openDetail(r) {
   var w = findWine(r); if (!w) return;
+  DETAIL_ROW = r;
   var t = typeStyle(w['종류']);
   var facts = [
     ['🍇 품종', w['품종']],
@@ -304,6 +349,7 @@ function openDetail(r) {
     facts.push(['💬 한줄평', w['한줄평']]);
     facts.push(['🍴 함께한 음식', w['함께한음식']]);
   }
+  var needSuggest = !w['서빙방법'] || !w['어울리는잔'];
   var photo = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '" style="width:100%;border-radius:14px;margin:14px 0 4px;">' : '';
   document.getElementById('detailBody').innerHTML =
     '<h3>' + esc(w['와인명']) + '</h3>' +
@@ -312,12 +358,29 @@ function openDetail(r) {
     '<div class="facts">' + facts.filter(function (f) { return f[1]; }).map(function (f) {
       return '<div class="fact"><div class="k">' + f[0] + '</div><div class="v">' + esc(f[1]) + '</div></div>';
     }).join('') + '</div>' +
+    (needSuggest ? '<div class="note" id="servingSuggest" style="margin-top:12px">🍷 서빙 방법 · 어울리는 잔 추천 만드는 중…</div>' : '') +
     '<div class="act-row" style="margin-top:14px">' +
     '<button class="act" onclick="startEdit(' + r + ')"><span class="ic">✏️</span>수정</button>' +
     '<button class="act" onclick="deleteWineConfirm(' + r + ')"><span class="ic">🗑</span>삭제</button>' +
     '</div>' +
     '<button class="more-toggle" onclick="cm(\'detailModal\')">닫기</button>';
   om('detailModal');
+
+  if (needSuggest) {
+    callAPI(function () { return API.suggestServing(r); }).then(function (res) {
+      if (DETAIL_ROW !== r) return; // 그 사이 다른 와인을 열었으면 무시
+      var box = document.getElementById('servingSuggest');
+      if (!box) return;
+      if (!res || res.error) { box.remove(); return; }
+      var rows = [];
+      if (res['서빙방법']) rows.push('<div class="fact"><div class="k">🌡 서빙</div><div class="v">' + esc(res['서빙방법']) + '</div></div>');
+      if (res['어울리는잔']) rows.push('<div class="fact"><div class="k">🥂 잔</div><div class="v">' + esc(res['어울리는잔']) + '</div></div>');
+      box.outerHTML = rows.length ? '<div class="facts" style="margin-top:0">' + rows.join('') + '</div>' : '';
+      // 다시 열 때 또 AI를 부르지 않도록 화면에 캐시해둔 데이터도 갱신
+      if (res['서빙방법']) w['서빙방법'] = res['서빙방법'];
+      if (res['어울리는잔']) w['어울리는잔'] = res['어울리는잔'];
+    });
+  }
 }
 
 /** 실수로 등록한 와인 삭제 (되돌리기 불가라 한 번 더 확인) */
