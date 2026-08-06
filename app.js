@@ -96,83 +96,31 @@ function submitAuth(ev) {
     document.getElementById('pinScreen').style.display = 'none';
     if (res.moved) toast('기존 와인 ' + res.moved + '병을 가져왔어요');
     else if (res.created) toast(res.name + ' 셀러를 만들었어요 🍾');
-    showBookmarkTip();
     load();
   });
 }
 
-/** 로그인 직후 한 번, 홈 화면에 추가하라고 가볍게 안내 */
-function showBookmarkTip() {
-  var box = document.getElementById('bookmarkTip');
-  box.innerHTML = '<div class="note">📱 <b>홈 화면에 두면 앱처럼 쓸 수 있어요</b>' +
-    '<div style="margin-top:9px">' +
-    '<button type="button" class="btn-copy" onclick="openInstall()">홈 화면에 추가</button>' +
-    '<button type="button" class="btn-copy ghost" onclick="document.getElementById(\'bookmarkTip\').innerHTML=\'\'">나중에</button>' +
-    '</div></div>';
+function openSettings() {
+  om('settingsModal');
 }
 
 /* ---------- 홈 화면 추가 / 공유 ----------
  * 이제 이 페이지 자체가 최상위 주소(iframe 아님)라, 특별한 요령 없이
  * 브라우저 기본 메뉴 안내만 보여주면 된다. 서버 호출도 필요 없다.
+ * 설치 방법은 앱 안에서 따로 안내하지 않고, 공유 메시지 본문에 실어 보낸다
+ * (받는 사람 기기를 알 수 없으니 아이폰/안드로이드 방법을 함께 적는다).
  */
 
-/** 기기 판별. 안내 문구가 기기마다 달라야 해서 필요하다. */
-function platform() {
-  var ua = navigator.userAgent || '';
-  // 아이패드는 최근 iOS에서 데스크톱 UA를 쓴다 → 터치 지원 여부로 함께 판별
-  var isIOS = /iPad|iPhone|iPod/.test(ua) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  if (isIOS) return 'ios';
-  if (/Android/i.test(ua)) return 'android';
-  return 'desktop';
-}
-
-var INSTALL_STEPS = {
-  ios: {
-    title: '아이폰 홈 화면에 추가',
-    steps: [
-      '화면 아래 <b>공유 버튼 <span style="font-size:15px">⬆️</span></b>를 누르세요',
-      '목록을 내려서 <b>홈 화면에 추가</b>를 누르세요',
-      '오른쪽 위 <b>추가</b>를 누르면 끝'
-    ],
-    warn: '사파리에서만 됩니다. 크롬으로 열었다면 사파리로 다시 열어주세요.'
-  },
-  android: {
-    title: '안드로이드 홈 화면에 추가',
-    steps: [
-      '크롬 오른쪽 위 <b>⋮</b>를 누르세요',
-      '<b>홈 화면에 추가</b> (또는 <b>앱 설치</b>)를 누르세요',
-      '<b>추가</b>를 누르면 끝'
-    ],
-    warn: '크롬에서 하시는 게 가장 잘 됩니다.'
-  },
-  desktop: {
-    title: '바로가기 만들기',
-    steps: [
-      '주소창 오른쪽 <b>설치 아이콘</b>을 누르거나',
-      '<b>Ctrl+D</b>(맥은 <b>⌘+D</b>)로 즐겨찾기에 추가하세요'
-    ],
-    warn: ''
-  }
-};
-
-function openInstall() {
-  var g = INSTALL_STEPS[platform()];
-  var list = g.steps.map(function (s, i) {
-    return '<div class="step"><span class="num">' + (i + 1) + '</span><span>' + s + '</span></div>';
-  }).join('');
-  document.getElementById('installBody').innerHTML =
-    '<h3>' + esc(g.title) + '</h3>' +
-    '<div class="facts" style="margin-top:12px">' + list + '</div>' +
-    (g.warn ? '<div class="note warn" style="margin-top:12px">⚠️ ' + g.warn + '</div>' : '') +
-    '<button class="more-toggle" onclick="cm(\'installModal\')">닫기</button>';
-  om('installModal');
-}
-
-/** 앱 공유. 주소에는 로그인 정보가 없으니(로그인은 localStorage에만 있음) 그냥 이 페이지 주소를 보낸다. */
+/** 주소에는 로그인 정보가 없으니(로그인은 localStorage에만 있음) 이 페이지 주소만 보낸다. */
 function shareApp() {
   var url = location.origin + location.pathname;
-  var data = { title: '와인 딸까 말까', text: '우리집 와인 셀러 앱이에요', url: url };
+  var howto = '📱 아이폰: 사파리로 열기 → 공유 버튼 → 홈 화면에 추가\n' +
+    '🤖 안드로이드: 크롬으로 열기 → ⋮ 메뉴 → 홈 화면에 추가';
+  var data = {
+    title: '와인 딸까 말까',
+    text: '우리집 와인 셀러 앱이에요 🍷\n홈 화면에 추가하면 앱처럼 쓸 수 있어요\n\n' + howto,
+    url: url
+  };
   if (navigator.share) {
     navigator.share(data).catch(function () { copyText(url); });
   } else {
@@ -670,11 +618,7 @@ function loadStats() {
       sect('월별', s.byMonth, false) +
       sect('가격대별', s.byPrice, false) +
       '<div style="text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--sub)">' +
-      '🍷 ' + esc(ME) + ' 셀러</div>' +
-      '<div class="act-row">' +
-      '<button class="act" onclick="openInstall()"><span class="ic">📱</span>홈 화면에 추가</button>' +
-      '<button class="act" onclick="shareApp()"><span class="ic">🔗</span>앱 공유</button>' +
-      '</div>';
+      '🍷 ' + esc(ME) + ' 셀러</div>';
   });
 }
 
