@@ -162,6 +162,13 @@
         <button class="primary-btn" type="submit">비밀번호 바꾸기</button>
       </form>
 
+      <h3 style="margin-top:22px;font-size:15px">내 잔 관리</h3>
+      <div class="chips" id="glassChips"></div>
+      <form onsubmit="submitAddGlass(event)">
+        <div class="field"><input id="glassNameInput" placeholder="예: 보르도 글라스, 부르고뉴 글라스"></div>
+        <button class="primary-btn alt" type="submit">잔 추가</button>
+      </form>
+
       <button class="more-toggle" onclick="cm('settingsModal')">닫기</button>
     </div>
   </div>

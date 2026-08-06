@@ -66,6 +66,12 @@ const API = {
   getDrunkMatches(keyword) { return this._get('getDrunkMatches', { keyword }); },
   recommendByFood(food)    { return this._get('recommendByFood', { food }); },
   getStats()               { return this._get('getStats'); },
+
+  // ── 내 잔 ──
+  getGlasses()              { return this._get('getGlasses'); },
+  addGlass(name)            { return this._post('addGlass', { name }); },
+  deleteGlass(row)          { return this._post('deleteGlass', { row }); },
+  suggestServing(row)       { return this._post('suggestServing', { row }); },
 };
 
 // 네트워크 자체가 끊긴 경우를 잡아주는 안전 래퍼. 서버가 돌려준 {error} 는 그대로 통과시킨다.

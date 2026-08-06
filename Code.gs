@@ -83,6 +83,10 @@ function dispatch_(action, p) {
     case 'getDrunkMatches':  return getDrunkMatches(token, p.keyword);
     case 'recommendByFood':  return recommendByFood(token, p.food);
     case 'getStats':         return getStats(token);
+    case 'getGlasses':       return getGlasses(token);
+    case 'addGlass':         return addGlass(token, p.name);
+    case 'deleteGlass':      return deleteGlass(token, p.row);
+    case 'suggestServing':   return suggestServing(token, p.row);
     default: throw new Error('알 수 없는 요청이에요: ' + action);
   }
 }
@@ -511,6 +515,102 @@ function deleteWine(token, rowIndex) {
   var sheet = requireOwnedRow_(me, rowIndex);
   sheet.deleteRow(Number(rowIndex));
   return { ok: true };
+}
+
+/* ===================== 내 잔 ===================== */
+
+var GLASS_SHEET = '내잔';
+var GLASS_COLUMNS = ['이름', '소유자'];
+
+/** 잔 시트 (없으면 만든다) */
+function glassSheet_() {
+  var ss = getSS_();
+  var sh = ss.getSheetByName(GLASS_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(GLASS_SHEET);
+    sh.getRange(1, 1, 1, GLASS_COLUMNS.length).setValues([GLASS_COLUMNS]);
+    sh.hideSheet();
+  }
+  return sh;
+}
+
+/** 내가 등록해둔 잔 목록 */
+function getGlasses(token) {
+  var me = String(requireUser_(token)['아이디']);
+  var sheet = glassSheet_();
+  var last = sheet.getLastRow();
+  if (last < 2) return [];
+  var values = sheet.getRange(2, 1, last - 1, GLASS_COLUMNS.length).getValues();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][1]).trim() !== me) continue;
+    out.push({ rowIndex: i + 2, '이름': values[i][0] });
+  }
+  return out;
+}
+
+/** 잔 추가 (같은 이름 중복 등록 방지) */
+function addGlass(token, name) {
+  var me = String(requireUser_(token)['아이디']);
+  name = String(name || '').trim();
+  if (!name) return { error: '잔 이름을 적어주세요' };
+  var existing = getGlasses(token);
+  if (existing.some(function (g) { return g['이름'] === name; })) return { error: '이미 등록된 잔이에요' };
+  glassSheet_().appendRow([name, me]);
+  return { ok: true };
+}
+
+/** 잔 삭제 */
+function deleteGlass(token, rowIndex) {
+  var me = String(requireUser_(token)['아이디']);
+  var sheet = glassSheet_();
+  rowIndex = Number(rowIndex);
+  if (!rowIndex || rowIndex < 2 || rowIndex > sheet.getLastRow()) throw new Error('없는 잔이에요');
+  if (String(sheet.getRange(rowIndex, 2).getValue()).trim() !== me) throw new Error('내 잔이 아니에요');
+  sheet.deleteRow(rowIndex);
+  return { ok: true };
+}
+
+/**
+ * 서빙 방법과 어울리는 잔을 AI로 추천한다. 내가 등록해둔 잔이 있으면
+ * 그중에서 우선 고르게 하고, 없으면 일반적인 잔 종류를 추천받는다.
+ * 한 번 추천받으면(원래 값이 비어 있던 필드만) 시트에 저장해서
+ * 다음에 열 때는 다시 AI를 부르지 않는다.
+ */
+function suggestServing(token, rowIndex) {
+  var me = String(requireUser_(token)['아이디']);
+  var sheet = requireOwnedRow_(me, rowIndex);
+  var headers = getHeaders_();
+  var row = sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
+  var wine = {};
+  headers.forEach(function (h, i) { wine[h] = row[i]; });
+
+  var myGlasses = getGlasses(token).map(function (g) { return g['이름']; });
+  var glassText = myGlasses.length
+    ? ('내가 가진 잔 목록: ' + JSON.stringify(myGlasses) + '\n이 중에서 이 와인에 가장 잘 맞는 잔을 골라라. 마땅한 게 없으면 일반적으로 어울리는 잔 종류를 알려줘도 된다.')
+    : '등록해둔 잔이 없으니 일반적으로 어울리는 잔 종류를 추천해라.';
+
+  var prompt = '너는 소믈리에다. 아래 와인 정보를 보고 서빙 방법과 어울리는 잔을 추천해라.\n' +
+    JSON.stringify({ 와인명: wine['와인명'], 종류: wine['종류'], 품종: wine['품종'], 생산지: wine['생산지/국가'], 빈티지: wine['빈티지'] }) +
+    '\n\n' + glassText + '\n\n' +
+    '서빙방법에는 적정 온도와 디캔팅 필요 여부 등을 한국어로 한두 문장으로 써라. ' +
+    '아래 JSON으로만 답해라.\n' +
+    '{"서빙방법":"...", "어울리는잔":"..."}';
+
+  var result = callGemini_([{ text: prompt }]);
+  if (!result || (!result['서빙방법'] && !result['어울리는잔'])) throw new Error('추천을 만들지 못했어요');
+
+  // 원래 비어 있던 필드만 채워서 저장 — 이미 적어둔 값은 덮어쓰지 않는다
+  if (result['서빙방법'] && !wine['서빙방법']) {
+    sheet.getRange(rowIndex, colIndex1_(headers, '서빙방법')).setValue(result['서빙방법']);
+  }
+  if (result['어울리는잔'] && !wine['어울리는잔']) {
+    sheet.getRange(rowIndex, colIndex1_(headers, '어울리는잔')).setValue(result['어울리는잔']);
+  }
+  return {
+    '서빙방법': wine['서빙방법'] || result['서빙방법'] || '',
+    '어울리는잔': wine['어울리는잔'] || result['어울리는잔'] || ''
+  };
 }
 
 function savePhoto_(dataUrl, name) {
