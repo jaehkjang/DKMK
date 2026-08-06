@@ -474,7 +474,9 @@ function savePhoto_(dataUrl, name) {
   var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(PHOTO_FOLDER_NAME);
   var file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  return 'https://drive.google.com/uc?id=' + file.getId();
+  // drive.google.com/uc?id=... 는 <img>로 바로 못 띄우는 경우가 많아졌다(바이러스 검사
+  // 경고 페이지로 리다이렉트되거나 임베드가 막힘). googleusercontent CDN 주소가 안정적이다.
+  return 'https://lh3.googleusercontent.com/d/' + file.getId() + '=s1000';
 }
 
 /* ===================== Gemini 공용 ===================== */
