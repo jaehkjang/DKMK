@@ -36,9 +36,11 @@
   <header>
     <div class="row">
       <h1 id="pgTitle">셀러</h1>
-      <span class="count" id="pgCount"></span>
+      <div class="row-right">
+        <span class="count" id="pgCount"></span>
+        <button type="button" class="settings-btn" onclick="openSettings()" aria-label="설정">⚙️</button>
+      </div>
     </div>
-    <div id="bookmarkTip"></div>
   </header>
 
   <main>
@@ -137,8 +139,15 @@
     <div class="modal"><div class="grip"></div><div id="detailBody"></div></div>
   </div>
 
-  <div class="modal-bg" id="installModal" onclick="if(event.target===this) cm('installModal')">
-    <div class="modal"><div class="grip"></div><div id="installBody"></div></div>
+  <div class="modal-bg" id="settingsModal" onclick="if(event.target===this) cm('settingsModal')">
+    <div class="modal">
+      <div class="grip"></div>
+      <h3>설정</h3>
+      <div class="act-row" style="margin-top:14px">
+        <button class="act" onclick="shareApp()"><span class="ic">🔗</span>홈 화면에 추가 / 공유</button>
+      </div>
+      <button class="more-toggle" onclick="cm('settingsModal')">닫기</button>
+    </div>
   </div>
 
   <div class="modal-bg" id="drinkModal" onclick="if(event.target===this) cm('drinkModal')">
