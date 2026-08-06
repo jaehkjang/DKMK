@@ -62,6 +62,26 @@ DB는 기존 "와인리스트" 구글 스프레드시트를 그대로 씁니다.
 
 이후 `Code.gs`를 고칠 때마다: **배포 관리 → 연필(수정) → 버전: 새 버전 → 배포**를 눌러야 합니다 (이렇게 해야 URL이 그대로 유지됩니다. **새 배포**를 다시 누르면 URL이 바뀌어서 6번부터 다시 해야 합니다).
 
+이 수동 배포를 매번 반복하기 싫으면, 아래 "Apps Script 자동 배포 설정"을 최초 1회 해두면 이후로는 `Code.gs`를 `main`에 push할 때마다 자동으로 배포됩니다.
+
+### 1-1. Apps Script 자동 배포 설정 (선택, 최초 1회만)
+
+`main`에 `Code.gs`가 push될 때마다 [`.github/workflows/deploy-apps-script.yml`](.github/workflows/deploy-apps-script.yml)이 [`clasp`](https://github.com/google/clasp)(구글 공식 Apps Script CLI)로 자동 배포합니다. 아래 설정은 컴퓨터에서 한 번만 하면 됩니다 — 구글 로그인이 필요한 단계라 이 저장소 쪽에서 대신 해줄 수 없습니다.
+
+1. 로컬 컴퓨터에 Node.js 설치 후: `npm install -g @google/clasp`
+2. `clasp login` — 브라우저가 열리면 Apps Script를 소유한 구글 계정으로 로그인. 성공하면 `~/.clasprc.json` 파일이 생깁니다
+3. Apps Script 편집기 → **⚙️ 프로젝트 설정** → **스크립트 ID** 복사
+4. 로컬에 저장소를 클론한 폴더에서: `clasp clone <스크립트ID>` (또는 이미 클론했다면 `clasp pull`)
+   - 이때 생기는 `.clasp.json`, `appsscript.json`을 저장소에 커밋해둡니다 (`appsscript.json`은 배포 설정을 담고 있어서 자동 배포가 이 파일을 덮어쓰지 않게 하려면 실제 값이 저장소에 있어야 합니다)
+5. **배포 관리**에서 기존 웹 앱 배포 항목의 **배포 ID**를 복사 (또는 `clasp deployments` 실행)
+6. GitHub 저장소 → **Settings → Secrets and variables → Actions → New repository secret**에 3개 등록
+   - `CLASPRC_JSON_B64` — `base64 -i ~/.clasprc.json | pbcopy` (맥) 또는 `base64 -w0 ~/.clasprc.json`로 만든 값
+   - `CLASP_JSON_B64` — `base64 -i .clasp.json | pbcopy` 또는 `base64 -w0 .clasp.json`로 만든 값
+   - `CLASP_DEPLOYMENT_ID` — 5번에서 복사한 배포 ID (base64 인코딩 없이 그대로)
+7. 여기까지 끝나면 이후로는 `Code.gs`를 고쳐서 `main`에 push(또는 PR 머지)만 하면 GitHub Actions가 자동으로 `clasp push` + 재배포까지 해줍니다. Actions 탭에서 진행 상황을 볼 수 있습니다.
+
+⚠️ `~/.clasprc.json`에는 구글 계정 접근 토큰이 들어있으니 **절대 커밋하지 말고** GitHub Secret으로만 등록하세요.
+
 ### 2. 프런트엔드(GitHub Pages) 배포
 
 1. [`api.js`](api.js) 맨 위 `API.URL`에 1번에서 받은 웹 앱 URL을 붙여넣고 커밋
