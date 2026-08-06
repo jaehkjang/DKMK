@@ -27,7 +27,8 @@
  *  - 비번은 솔트 + SHA-256 반복 해시로 저장하며, 원문은 어디에도 남지 않습니다.
  */
 
-var NEW_COLUMNS = ['어울리는잔', '서빙방법', '와인배경', '평점', '한줄평', '함께한음식', '라벨사진', '소유자'];
+var NEW_COLUMNS = ['어울리는잔', '서빙방법', '와인배경', '평점', '한줄평', '함께한음식', '라벨사진', '소유자',
+  '서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점', '내잔추천', '내잔추천별점'];
 var PHOTO_FOLDER_NAME = '와인라벨사진';
 
 /* ===================== API 라우터 ===================== */
@@ -572,10 +573,12 @@ function deleteGlass(token, rowIndex) {
 }
 
 /**
- * 서빙 방법과 어울리는 잔을 AI로 추천한다. 내가 등록해둔 잔이 있으면
- * 그중에서 우선 고르게 하고, 없으면 일반적인 잔 종류를 추천받는다.
- * 한 번 추천받으면(원래 값이 비어 있던 필드만) 시트에 저장해서
- * 다음에 열 때는 다시 AI를 부르지 않는다.
+ * 서빙 온도·에어링(디캔팅) 시간·어울리는 잔을 AI로 추천한다.
+ * 잔은 두 가지로 나눠서 추천한다:
+ *  - 완벽한잔: 내가 뭘 갖고 있는지와 무관하게 이 와인에 이상적으로 맞는 잔
+ *  - 내잔추천: 내가 등록해둔 잔 목록 중 가장 잘 맞는 것(없거나 마땅치 않으면 null)
+ * 둘 다 5점 만점 별점이 붙는다(완벽할 때만 5점).
+ * 한 번 추천받으면(원래 비어 있던 필드만) 시트에 저장해서 다음엔 다시 AI를 부르지 않는다.
  */
 function suggestServing(token, rowIndex) {
   var me = String(requireUser_(token)['아이디']);
@@ -587,30 +590,39 @@ function suggestServing(token, rowIndex) {
 
   var myGlasses = getGlasses(token).map(function (g) { return g['이름']; });
   var glassText = myGlasses.length
-    ? ('내가 가진 잔 목록: ' + JSON.stringify(myGlasses) + '\n이 중에서 이 와인에 가장 잘 맞는 잔을 골라라. 마땅한 게 없으면 일반적으로 어울리는 잔 종류를 알려줘도 된다.')
-    : '등록해둔 잔이 없으니 일반적으로 어울리는 잔 종류를 추천해라.';
+    ? ('내가 가진 잔 목록: ' + JSON.stringify(myGlasses) + '\n"내잔추천"에는 이 중에서 이 와인에 가장 잘 맞는 잔을 하나 골라 넣어라. 아무리 봐도 마땅한 게 없으면 내잔추천은 null로 남겨라.')
+    : '등록해둔 잔이 없으니 "내잔추천"은 null로 남겨라.';
 
   var prompt = '너는 소믈리에다. 아래 와인 정보를 보고 서빙 방법과 어울리는 잔을 추천해라.\n' +
     JSON.stringify({ 와인명: wine['와인명'], 종류: wine['종류'], 품종: wine['품종'], 생산지: wine['생산지/국가'], 빈티지: wine['빈티지'] }) +
     '\n\n' + glassText + '\n\n' +
-    '서빙방법에는 적정 온도와 디캔팅 필요 여부 등을 한국어로 한두 문장으로 써라. ' +
+    '"완벽한잔"에는 내가 뭘 가지고 있는지와 무관하게 이 와인에 이상적으로 가장 잘 맞는 잔 종류를 넣어라. ' +
+    '잔 두 개(완벽한잔, 내잔추천) 모두 5점 만점 별점을 매겨라 — 정말 완벽하게 어울릴 때만 5점을 주고, 자신 없으면 4점 이하로 줘라.\n\n' +
     '아래 JSON으로만 답해라.\n' +
-    '{"서빙방법":"...", "어울리는잔":"..."}';
+    '{"서빙온도":"예: 16-18°C", "에어링시간":"예: 디캔팅 30분 또는 필요 없음", ' +
+    '"완벽한잔":{"이름":"...","별점":1~5}, "내잔추천":{"이름":"...","별점":1~5} 또는 null}';
 
   var result = callGemini_([{ text: prompt }]);
-  if (!result || (!result['서빙방법'] && !result['어울리는잔'])) throw new Error('추천을 만들지 못했어요');
+  if (!result) throw new Error('추천을 만들지 못했어요');
 
-  // 원래 비어 있던 필드만 채워서 저장 — 이미 적어둔 값은 덮어쓰지 않는다
-  if (result['서빙방법'] && !wine['서빙방법']) {
-    sheet.getRange(rowIndex, colIndex1_(headers, '서빙방법')).setValue(result['서빙방법']);
-  }
-  if (result['어울리는잔'] && !wine['어울리는잔']) {
-    sheet.getRange(rowIndex, colIndex1_(headers, '어울리는잔')).setValue(result['어울리는잔']);
-  }
-  return {
-    '서빙방법': wine['서빙방법'] || result['서빙방법'] || '',
-    '어울리는잔': wine['어울리는잔'] || result['어울리는잔'] || ''
+  var updates = {
+    '서빙온도': result['서빙온도'] || '',
+    '에어링시간': result['에어링시간'] || '',
+    '완벽한잔': (result['완벽한잔'] && result['완벽한잔']['이름']) || '',
+    '완벽한잔별점': (result['완벽한잔'] && result['완벽한잔']['별점']) || '',
+    '내잔추천': (result['내잔추천'] && result['내잔추천']['이름']) || '',
+    '내잔추천별점': (result['내잔추천'] && result['내잔추천']['별점']) || ''
   };
+
+  // 원래 비어 있던 필드만 채워서 저장 — 이미 값이 있으면 덮어쓰지 않는다
+  var out = {};
+  Object.keys(updates).forEach(function (h) {
+    if (wine[h]) { out[h] = wine[h]; return; }
+    if (updates[h] === '' || headers.indexOf(h) === -1) { out[h] = ''; return; }
+    sheet.getRange(rowIndex, colIndex1_(headers, h)).setValue(updates[h]);
+    out[h] = updates[h];
+  });
+  return out;
 }
 
 function savePhoto_(dataUrl, name) {
@@ -870,8 +882,9 @@ function recommendByFood(token, food) {
       JSON.stringify(menu) + '\n\n' + askText + '\n\n' +
       '정말 잘 어울리거나 마실 만하다고 자신 있게 말할 수 있는 와인만 골라라. ' +
       '억지로 3개를 채우지 말고, 그런 와인이 하나도 없으면 빈 배열을 반환해라. ' +
+      '각 추천에는 5점 만점 별점을 매겨라 — 정말 완벽하게 어울릴 때만 5점을 주고, 자신 없으면 4점 이하로 줘라. ' +
       '아래 JSON 배열로만 답하라.\n' +
-      '[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "fromCellarPairing":true또는false}]';
+      '[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}]';
 
     var picks = callGemini_([{ text: prompt }]);
     var list = Array.isArray(picks) ? picks : (picks.recommendations || picks.list || []);
@@ -883,6 +896,7 @@ function recommendByFood(token, food) {
           out.push({
             wine: owned[i],
             reason: p.reason || '',
+            '별점': p['별점'] || 0,
             matched: !!p.fromCellarPairing || !!directIds[p.id]
           });
           break;

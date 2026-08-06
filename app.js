@@ -332,13 +332,15 @@ function openDetail(r) {
   var w = findWine(r); if (!w) return;
   DETAIL_ROW = r;
   var t = typeStyle(w['종류']);
+  var hasAiServing = w['서빙온도'] || w['완벽한잔'];
   var facts = [
     ['🍇 품종', w['품종']],
     ['📍 생산지', w['생산지/국가']],
     ['📅 빈티지', w['빈티지']],
     ['💰 가격', w['평균가격(국내·원)']],
-    ['🥂 잔', w['어울리는잔']],
-    ['🌡 서빙', w['서빙방법']],
+    // AI 추천(서빙온도/완벽한잔)이 이미 있으면 옛날 방식 수동 입력 필드는 중복이라 숨긴다
+    ['🥂 잔', hasAiServing ? '' : w['어울리는잔']],
+    ['🌡 서빙', hasAiServing ? '' : w['서빙방법']],
     ['🍽 페어링', w['추천 페어링']],
     ['📖 배경', w['와인배경']],
     ['📝 메모', w['메모']]
@@ -349,7 +351,7 @@ function openDetail(r) {
     facts.push(['💬 한줄평', w['한줄평']]);
     facts.push(['🍴 함께한 음식', w['함께한음식']]);
   }
-  var needSuggest = !w['서빙방법'] || !w['어울리는잔'];
+  var needSuggest = !w['서빙온도'];
   var photo = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '" style="width:100%;border-radius:14px;margin:14px 0 4px;">' : '';
   document.getElementById('detailBody').innerHTML =
     '<h3>' + esc(w['와인명']) + '</h3>' +
@@ -358,7 +360,7 @@ function openDetail(r) {
     '<div class="facts">' + facts.filter(function (f) { return f[1]; }).map(function (f) {
       return '<div class="fact"><div class="k">' + f[0] + '</div><div class="v">' + esc(f[1]) + '</div></div>';
     }).join('') + '</div>' +
-    (needSuggest ? '<div class="note" id="servingSuggest" style="margin-top:12px">🍷 서빙 방법 · 어울리는 잔 추천 만드는 중…</div>' : '') +
+    (hasAiServing ? servingFactsHtml(w) : (needSuggest ? '<div class="note" id="servingSuggest" style="margin-top:12px">🍷 서빙 정보 · 잔 추천 만드는 중…</div>' : '')) +
     '<div class="act-row" style="margin-top:14px">' +
     '<button class="act" onclick="startEdit(' + r + ')"><span class="ic">✏️</span>수정</button>' +
     '<button class="act" onclick="deleteWineConfirm(' + r + ')"><span class="ic">🗑</span>삭제</button>' +
@@ -372,15 +374,28 @@ function openDetail(r) {
       var box = document.getElementById('servingSuggest');
       if (!box) return;
       if (!res || res.error) { box.remove(); return; }
-      var rows = [];
-      if (res['서빙방법']) rows.push('<div class="fact"><div class="k">🌡 서빙</div><div class="v">' + esc(res['서빙방법']) + '</div></div>');
-      if (res['어울리는잔']) rows.push('<div class="fact"><div class="k">🥂 잔</div><div class="v">' + esc(res['어울리는잔']) + '</div></div>');
-      box.outerHTML = rows.length ? '<div class="facts" style="margin-top:0">' + rows.join('') + '</div>' : '';
-      // 다시 열 때 또 AI를 부르지 않도록 화면에 캐시해둔 데이터도 갱신
-      if (res['서빙방법']) w['서빙방법'] = res['서빙방법'];
-      if (res['어울리는잔']) w['어울리는잔'] = res['어울리는잔'];
+      ['서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점', '내잔추천', '내잔추천별점'].forEach(function (k) {
+        if (res[k]) w[k] = res[k];
+      });
+      box.outerHTML = servingFactsHtml(w);
     });
   }
+}
+
+/**
+ * 서빙 온도 · 에어링(디캔팅) 시간 · 완벽한 잔 · 내가 가진 잔 중 추천을 각각
+ * 따로 보여준다. 잔 두 종류에는 5점 만점 별점이 함께 붙는다(완벽할 때만 5개).
+ */
+function servingFactsHtml(w) {
+  var rows = [];
+  if (w['서빙온도']) rows.push(['🌡️ 서빙 온도', w['서빙온도']]);
+  if (w['에어링시간']) rows.push(['⏱ 에어링 시간', w['에어링시간']]);
+  if (w['완벽한잔']) rows.push(['🥂 완벽한 잔', w['완벽한잔'] + ' ' + starsHtml(w['완벽한잔별점'])]);
+  if (w['내잔추천']) rows.push(['🍷 내 잔 추천', w['내잔추천'] + ' ' + starsHtml(w['내잔추천별점'])]);
+  if (!rows.length) return '';
+  return '<div class="facts" style="margin-top:0">' + rows.map(function (f) {
+    return '<div class="fact"><div class="k">' + f[0] + '</div><div class="v">' + esc(f[1]) + '</div></div>';
+  }).join('') + '</div>';
 }
 
 /** 실수로 등록한 와인 삭제 (되돌리기 불가라 한 번 더 확인) */
@@ -749,7 +764,8 @@ function runRecommend(food) {
     area.innerHTML = list.map(function (x) {
       var w = x.wine || x;
       var badge = x.matched ? '<div class="match-badge">🍷 이 와인 페어링 정보에 있어요</div>' : '';
-      var reason = x.reason ? '<div class="reason">' + esc(x.reason) + '</div>' : '';
+      var stars = x['별점'] ? '<span class="stars">' + starsHtml(x['별점']) + '</span> ' : '';
+      var reason = (stars || x.reason) ? '<div class="reason">' + stars + esc(x.reason || '') + '</div>' : '';
       return cardHtml(w, badge + reason);
     }).join('');
   });
