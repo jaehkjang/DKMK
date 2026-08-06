@@ -6,7 +6,7 @@
 
 var ALL_WINES = [], SEG = '보유', PENDING_ROW = null, CURRENT_RATING = 5;
 var PHOTO_DATAURL = null, PICKS = [], PICK_ON = {}, SELECTED_TYPE = '';
-var TOKEN = '', ME = '';
+var TOKEN = '', ME = '', EDIT_ROW = null;
 
 var TYPES = [
   { n:'레드',        c:'#8C1D33', s:'#F7E9EC' },
@@ -280,8 +280,69 @@ function openDetail(r) {
     '<div class="facts">' + facts.filter(function (f) { return f[1]; }).map(function (f) {
       return '<div class="fact"><div class="k">' + f[0] + '</div><div class="v">' + esc(f[1]) + '</div></div>';
     }).join('') + '</div>' +
+    '<div class="act-row" style="margin-top:14px">' +
+    '<button class="act" onclick="startEdit(' + r + ')"><span class="ic">✏️</span>수정</button>' +
+    '<button class="act" onclick="deleteWineConfirm(' + r + ')"><span class="ic">🗑</span>삭제</button>' +
+    '</div>' +
     '<button class="more-toggle" onclick="cm(\'detailModal\')">닫기</button>';
   om('detailModal');
+}
+
+/** 실수로 등록한 와인 삭제 (되돌리기 불가라 한 번 더 확인) */
+function deleteWineConfirm(r) {
+  var w = findWine(r); if (!w) return;
+  if (!confirm((w['와인명'] || '이 와인') + '을(를) 삭제할까요? 되돌릴 수 없어요.')) return;
+  callAPI(function () { return API.deleteWine(r); }).then(function (res) {
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
+    cm('detailModal');
+    toast('삭제했어요');
+    load();
+  });
+}
+
+/** 잘못 입력된 정보를 고치러 "추가" 화면으로 이동 (같은 폼을 재사용) */
+function startEdit(r) {
+  var w = findWine(r); if (!w) return;
+  EDIT_ROW = r;
+  cm('detailModal');
+
+  var fields = ['와인명', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)', '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모'];
+  fields.forEach(function (f) {
+    var el = document.getElementById('f_' + f);
+    if (el) el.value = w[f] || '';
+  });
+  SELECTED_TYPE = typeStyle(w['종류']).n;
+  document.querySelectorAll('#typeChips button').forEach(function (x) { x.classList.toggle('on', x.dataset.t === SELECTED_TYPE); });
+
+  document.getElementById('moreFields').classList.add('on');
+  document.getElementById('moreLabel').textContent = '− 접기';
+  document.getElementById('similarHint').innerHTML = '';
+  PHOTO_DATAURL = null;
+  document.getElementById('photoPreview').innerHTML = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '">' : '';
+  document.getElementById('photoNote').innerHTML = '<div class="note">사진을 새로 찍으면 라벨 사진이 교체돼요. 그대로 두면 기존 사진이 유지돼요</div>';
+  document.getElementById('addForm').style.display = '';
+  document.getElementById('pickArea').style.display = 'none';
+  document.getElementById('addBtn').textContent = '수정하기';
+
+  showPage('Add');
+  document.getElementById('pgTitle').textContent = '와인 수정';
+}
+
+/** 탭에서 "추가"를 직접 눌렀을 때 — 혹시 수정 모드가 남아있으면 새 등록으로 초기화 */
+function goAddFresh() {
+  if (EDIT_ROW !== null) resetAddForm();
+  showPage('Add');
+}
+
+function resetAddForm() {
+  EDIT_ROW = null;
+  document.querySelectorAll('#addForm input, #addForm textarea').forEach(function (el) { el.value = ''; });
+  document.querySelectorAll('#typeChips button').forEach(function (x) { x.classList.remove('on'); });
+  SELECTED_TYPE = ''; PHOTO_DATAURL = null;
+  document.getElementById('similarHint').innerHTML = '';
+  document.getElementById('photoPreview').innerHTML = '';
+  document.getElementById('photoNote').innerHTML = '';
+  document.getElementById('addBtn').textContent = '셀러에 넣기';
 }
 
 /* ---------- 마시기 ---------- */
@@ -527,7 +588,7 @@ function checkSimilar() {
   }, 400);
 }
 
-/* ---------- 추가 저장 ---------- */
+/* ---------- 추가 / 수정 저장 ---------- */
 function submitAdd(e) {
   e.preventDefault();
   var fields = ['와인명', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)', '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모'];
@@ -538,22 +599,20 @@ function submitAdd(e) {
   });
   if (!data['와인명']) { toast('와인 이름을 적어주세요'); return; }
 
+  var editing = EDIT_ROW !== null;
   var btn = document.getElementById('addBtn');
-  btn.disabled = true; btn.textContent = '담는 중…';
-  callAPI(function () { return API.addWine(data, PHOTO_DATAURL); }).then(function (res) {
+  btn.disabled = true; btn.textContent = editing ? '수정하는 중…' : '담는 중…';
+  callAPI(function () {
+    return editing ? API.updateWine(EDIT_ROW, data, PHOTO_DATAURL) : API.addWine(data, PHOTO_DATAURL);
+  }).then(function (res) {
     if (!res || res.error) {
       toast('실패: ' + ((res && res.error) || ''));
-      btn.disabled = false; btn.textContent = '셀러에 넣기';
+      btn.disabled = false; btn.textContent = editing ? '수정하기' : '셀러에 넣기';
       return;
     }
-    toast('셀러에 담았어요 🍾');
-    document.querySelectorAll('#addForm input, #addForm textarea').forEach(function (el) { el.value = ''; });
-    document.querySelectorAll('#typeChips button').forEach(function (x) { x.classList.remove('on'); });
-    SELECTED_TYPE = ''; PHOTO_DATAURL = null;
-    document.getElementById('similarHint').innerHTML = '';
-    document.getElementById('photoPreview').innerHTML = '';
-    document.getElementById('photoNote').innerHTML = '';
-    btn.disabled = false; btn.textContent = '셀러에 넣기';
+    toast(editing ? '수정했어요' : '셀러에 담았어요 🍾');
+    resetAddForm();
+    btn.disabled = false;
     goCellarOwned();
   });
 }

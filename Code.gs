@@ -73,6 +73,8 @@ function dispatch_(action, p) {
     case 'getWines':         return getWines(token);
     case 'addWine':          return addWine(token, p.data, p.photo);
     case 'addWines':         return addWines(token, p.list);
+    case 'updateWine':       return updateWine(token, p.row, p.data, p.photo);
+    case 'deleteWine':       return deleteWine(token, p.row);
     case 'markDrunk':        return markDrunk(token, p.row, p.info);
     case 'unmarkDrunk':      return unmarkDrunk(token, p.row);
     case 'recognizeLabel':   return recognizeLabel(token, p.photo);
@@ -460,6 +462,35 @@ function addWine(token, data, photoDataUrl) {
     return (data && data[h]) || '';
   });
   sheet.appendRow(row);
+  return { ok: true };
+}
+
+/** 잘못 등록된 정보를 고칠 수 있는 필드. 상태/등록일/마신날짜/소유자처럼
+ * 다른 동작(마시기/되돌리기/셀러 분리)이 관리하는 컬럼은 여기서 손대지 않는다. */
+var EDITABLE_FIELDS = ['와인명', '종류', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)',
+  '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모'];
+
+/** 와인 정보 수정. photoDataUrl을 보내면 라벨 사진을 새로 찍은 걸로 교체한다. */
+function updateWine(token, rowIndex, data, photoDataUrl) {
+  var me = String(requireUser_(token)['아이디']);
+  var sheet = requireOwnedRow_(me, rowIndex);
+  var headers = getHeaders_();
+  EDITABLE_FIELDS.forEach(function (h) {
+    if (headers.indexOf(h) === -1 || !data || data[h] === undefined) return;
+    sheet.getRange(rowIndex, colIndex1_(headers, h)).setValue(data[h]);
+  });
+  if (photoDataUrl) {
+    var photoUrl = savePhoto_(photoDataUrl, (data && data['와인명']) || 'wine');
+    sheet.getRange(rowIndex, colIndex1_(headers, '라벨사진')).setValue(photoUrl);
+  }
+  return { ok: true };
+}
+
+/** 실수로 등록한 와인 삭제. */
+function deleteWine(token, rowIndex) {
+  var me = String(requireUser_(token)['아이디']);
+  var sheet = requireOwnedRow_(me, rowIndex);
+  sheet.deleteRow(Number(rowIndex));
   return { ok: true };
 }
 

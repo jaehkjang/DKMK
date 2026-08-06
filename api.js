@@ -52,6 +52,8 @@ const API = {
   getWines()               { return this._get('getWines'); },
   addWine(data, photo)     { return this._post('addWine', { data, photo }); },
   addWines(list)           { return this._post('addWines', { list }); },
+  updateWine(row, data, photo) { return this._post('updateWine', { row, data, photo }); },
+  deleteWine(row)          { return this._post('deleteWine', { row }); },
   markDrunk(row, info)     { return this._post('markDrunk', { row, info }); },
   unmarkDrunk(row)         { return this._post('unmarkDrunk', { row }); },
 
