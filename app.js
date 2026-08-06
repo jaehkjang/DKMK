@@ -170,10 +170,14 @@ function fallbackCopy(text, done) {
   if (okCopy) done(); else toast('복사가 안 돼요. 주소창을 길게 눌러 복사해주세요');
 }
 
-/** 저장된 토큰이 아직 유효한지 확인하고 앱을 연다 */
+/**
+ * 저장된 토큰이 아직 유효한지 확인하고 앱을 연다. 확인이 끝나기 전엔
+ * 로그인 입력창 대신 "불러오는 중…"만 보여준다 — 어차피 자동 로그인될
+ * 화면에서 아이디/비번 입력창이 잠깐 번쩍이는 게 지저분해서.
+ */
 function bootstrap() {
   TOKEN = API.loadToken();
-  if (!TOKEN) return;
+  if (!TOKEN) { showAuthForm(); return; }
   callAPI(function () { return API.checkToken(); }).then(function (res) {
     if (res && res.ok) {
       ME = res.name;
@@ -182,8 +186,14 @@ function bootstrap() {
     } else {
       API.setToken(''); TOKEN = '';
       document.getElementById('pinErr').textContent = '다시 들어와주세요';
+      showAuthForm();
     }
   });
+}
+
+function showAuthForm() {
+  document.getElementById('authLoading').style.display = 'none';
+  document.getElementById('authForm').style.display = '';
 }
 
 /* ---------- 화면 전환 ---------- */
