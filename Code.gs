@@ -479,7 +479,7 @@ function savePhoto_(dataUrl, name) {
 
 /* ===================== Gemini 공용 ===================== */
 
-var GEMINI_MODEL = 'gemini-2.0-flash';
+var GEMINI_MODEL = 'gemini-3.6-flash';
 
 /** Gemini 호출 후 JSON 응답을 파싱해서 반환. parts는 [{text:..}, {inline_data:..}] 형태. */
 function callGemini_(parts) {
@@ -501,6 +501,9 @@ function callGemini_(parts) {
   var status = resp.getResponseCode();
   if (status === 401 || status === 403) {
     throw new Error('GEMINI_API_KEY가 잘못됐거나 만료됐어요. https://aistudio.google.com/apikey 에서 키를 다시 확인하고 스크립트 속성에 다시 저장한 뒤, 배포 관리 → 새 버전으로 재배포해주세요. (' + status + ')');
+  }
+  if (status === 404 && /is no longer available/.test(resp.getContentText())) {
+    throw new Error('AI 모델(' + GEMINI_MODEL + ')이 구글에서 서비스 종료됐어요. Code.gs의 GEMINI_MODEL 값을 https://ai.google.dev/gemini-api/docs/models 에서 최신 모델 이름으로 바꾸고 재배포해주세요. (404)');
   }
   if (status !== 200) {
     throw new Error('AI 호출 실패 (' + status + '): ' + resp.getContentText().slice(0, 200));
