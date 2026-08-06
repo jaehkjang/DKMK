@@ -70,6 +70,7 @@ function dispatch_(action, p) {
   switch (action) {
     case 'enter':            return enter(p.name, p.pw);
     case 'checkToken':       return checkToken(token);
+    case 'changePassword':   return changePassword(token, p.oldPw, p.newPw);
     case 'getWines':         return getWines(token);
     case 'addWine':          return addWine(token, p.data, p.photo);
     case 'addWines':         return addWines(token, p.list);
@@ -392,6 +393,24 @@ function claimOrphanWines_(id) {
   }
   if (count) range.setValues(values);
   return count;
+}
+
+/** 비밀번호 변경. 현재 비번을 확인한 뒤 새 4자리 숫자로 교체한다(솔트도 새로 만듦). */
+function changePassword(token, oldPw, newPw) {
+  var user = requireUser_(token);
+  oldPw = String(oldPw || '');
+  newPw = String(newPw || '');
+
+  if (hashPw_(oldPw, user['솔트']) !== user['비번해시']) {
+    return { error: '현재 비밀번호가 맞지 않아요' };
+  }
+  if (!/^\d{4}$/.test(newPw)) return { error: '새 비밀번호는 4자리 숫자로 입력해주세요' };
+
+  var salt = randomHex_(16);
+  var sheet = userSheet_();
+  sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('비번해시') + 1).setValue(hashPw_(newPw, salt));
+  sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('솔트') + 1).setValue(salt);
+  return { ok: true };
 }
 
 /** 토큰이 아직 쓸 만한지 확인 (앱 시작 때) */

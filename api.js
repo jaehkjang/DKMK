@@ -47,6 +47,7 @@ const API = {
   // ── 셀러(계정) ──
   enter(name, pw)          { return this._post('enter', { name, pw }); },
   checkToken()             { return this._get('checkToken'); },
+  changePassword(oldPw, newPw) { return this._post('changePassword', { oldPw, newPw }); },
 
   // ── 목록 ──
   getWines()               { return this._get('getWines'); },
