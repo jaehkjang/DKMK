@@ -144,6 +144,7 @@
     background:var(--wine); color:#fff; font-size:16px; font-weight:800; margin-top:4px;
     }
     .primary-btn:disabled { opacity:.5; }
+    .primary-btn.alt { background:var(--gold); }
 
     /* ---------- 사진 ---------- */
     .shoot { display:flex; gap:10px; margin-bottom:16px; }
