@@ -682,17 +682,18 @@ function getDrunkMatches(token, keyword) {
 
 /**
  * 음식 입력 → 보유 와인 중 추천. 여러 음식을 "·"로 이어 한 번에 물어볼 수 있다
- * (화면에서 칩을 여러 개 고르면 이렇게 합쳐서 보낸다).
+ * (화면에서 칩을 여러 개 고르면 이렇게 합쳐서 보낸다). food가 빈 문자열이면
+ * "안주 없이 그냥 마실 와인 추천" 모드로 동작한다.
  * 각 와인의 "추천 페어링" 필드(셀러에 이미 적어둔 정보)를 최우선 근거로 삼고,
  * 거기 없어도 품종/종류로 AI가 순위·이유를 정한다(키워드가 안 겹쳐도 추천 가능).
  * 예전에 마시고 별점을 높게 준 기록이 있으면 그 취향(품종·종류)도 우선순위에 반영한다.
- * API 실패 시 키워드 매칭으로 자동 대체.
+ * 정말 잘 어울리는 와인이 없으면 억지로 채우지 않고 빈 배열을 돌려준다.
+ * API 실패 시(food가 있을 때만) 키워드 매칭으로 자동 대체.
  * 반환: [{ wine, reason, matched }] — matched는 셀러 페어링 정보에 직접 근거했는지
  */
 function recommendByFood(token, food) {
   requireUser_(token);
   food = String(food || '').trim();
-  if (!food) return [];
 
   var all = getWines(token).wines;
   var owned = all.filter(function (w) { return w['상태'] === '보유'; });
@@ -707,12 +708,14 @@ function recommendByFood(token, food) {
 
   // 셀러에 이미 적힌 페어링 문구와 글자가 직접 겹치는 와인 — 우리 데이터가 근거인 경우
   var directIds = {};
-  owned.forEach(function (w) {
-    var text = String(w['추천 페어링'] || '');
-    if (!text || !food) return;
-    var hit = food.split(/[·,]+/).some(function (f) { f = f.trim(); return f && text.indexOf(f) !== -1; });
-    if (hit) directIds[w.rowIndex] = true;
-  });
+  if (food) {
+    owned.forEach(function (w) {
+      var text = String(w['추천 페어링'] || '');
+      if (!text) return;
+      var hit = food.split(/[·,]+/).some(function (f) { f = f.trim(); return f && text.indexOf(f) !== -1; });
+      if (hit) directIds[w.rowIndex] = true;
+    });
+  }
 
   try {
     var menu = owned.map(function (w) {
@@ -732,15 +735,22 @@ function recommendByFood(token, food) {
         '\n비슷한 품종·스타일의 와인이 지금 목록에 있으면 그 취향도 반영해서 우선순위를 살짝 더 높이고, ' +
         '취향이 반영됐으면 reason에 짧게 그 이유(예: "전에 좋아하셨던 산지오베제 계열")를 언급해라.') : '';
 
+    var askText = food
+      ? ('오늘 먹을 음식(여러 개면 가운데 점 · 으로 구분됨): "' + food + '"' + prefText + '\n\n' +
+        '이 음식(들)에 가장 잘 어울리는 와인을 이 목록 안에서만 좋은 순서로 최대 3개 추천해라. ' +
+        '음식이 여러 개면 그 자리에 다 같이 두루 잘 어울리는 와인을 우선하고, 마땅한 게 없으면 음식별로 가장 좋은 조합을 하나씩 골라도 된다. ' +
+        '와인의 "기존페어링" 필드에 이 음식(또는 같은 계열의 음식)이 이미 적혀 있으면 그것을 최우선 근거로 삼고, ' +
+        'reason에 그 문구를 언급해라. 기존페어링에 없어도 품종·종류로 보아 잘 어울리면 추천해도 된다. ' +
+        '한식이면 양념의 맛(맵기·단맛·기름기)까지 고려해라.')
+      : ('오늘은 곁들일 음식 없이 와인만 마시고 싶다.' + prefText + '\n\n' +
+        '이 목록 안에서 오늘 그냥 마시기 좋은 와인을 좋은 순서로 최대 3개 추천해라. ' +
+        '와인 자체의 스타일·마시기 편한 정도(가벼움/묵직함)·평소 취향을 근거로 골라라.');
+
     var prompt = '너는 소믈리에다. 아래는 우리 집 와인 셀러에 지금 있는 와인 목록이고, ' +
       '각 와인의 "기존페어링" 필드에는 우리가 이미 적어둔 어울리는 음식 정보가 있다.\n' +
-      JSON.stringify(menu) + '\n\n' +
-      '오늘 먹을 음식(여러 개면 가운데 점 · 으로 구분됨): "' + food + '"' + prefText + '\n\n' +
-      '이 음식(들)에 가장 잘 어울리는 와인을 이 목록 안에서만 좋은 순서로 최대 3개 추천해라. ' +
-      '음식이 여러 개면 그 자리에 다 같이 두루 잘 어울리는 와인을 우선하고, 마땅한 게 없으면 음식별로 가장 좋은 조합을 하나씩 골라도 된다. ' +
-      '와인의 "기존페어링" 필드에 이 음식(또는 같은 계열의 음식)이 이미 적혀 있으면 그것을 최우선 근거로 삼고, ' +
-      'reason에 그 문구를 언급해라. 기존페어링에 없어도 품종·종류로 보아 잘 어울리면 추천해도 된다. ' +
-      '한식이면 양념의 맛(맵기·단맛·기름기)까지 고려해라. ' +
+      JSON.stringify(menu) + '\n\n' + askText + '\n\n' +
+      '정말 잘 어울리거나 마실 만하다고 자신 있게 말할 수 있는 와인만 골라라. ' +
+      '억지로 3개를 채우지 말고, 그런 와인이 하나도 없으면 빈 배열을 반환해라. ' +
       '아래 JSON 배열로만 답하라.\n' +
       '[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "fromCellarPairing":true또는false}]';
 
@@ -760,9 +770,10 @@ function recommendByFood(token, food) {
         }
       }
     });
-    if (out.length) return out;
+    return out;
   } catch (e) {
-    // AI 실패 시 아래 키워드 매칭으로 넘어감
+    // AI 실패 시(음식이 있을 때만) 아래 키워드 매칭으로 넘어감
+    if (!food) return [];
   }
 
   return recommendByKeyword_(food, owned, liked).map(function (x) {

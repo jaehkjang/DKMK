@@ -627,6 +627,19 @@ function doRecommend() {
     renderQuickFoods();
     renderCellarPairingChips();
   }
+  runRecommend(food);
+}
+
+/** 안주 없이 그냥 오늘 마시기 좋은 와인 추천 */
+function doRecommendNoFood() {
+  document.getElementById('foodInput').value = '';
+  SELECTED_FOODS = [];
+  renderQuickFoods();
+  renderCellarPairingChips();
+  runRecommend('');
+}
+
+function runRecommend(food) {
   var area = document.getElementById('foodArea');
   area.innerHTML = '<div class="loading">🍷 고르는 중…</div>';
   callAPI(function () { return API.recommendByFood(food); }).then(function (list) {
