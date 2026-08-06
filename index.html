@@ -23,14 +23,18 @@
     <div class="glass"></div>
     <div class="t">와인 딸까 말까</div>
 
-    <form class="auth-form" onsubmit="submitAuth(event)">
-      <input id="authId" placeholder="셀러 이름" autocomplete="username" autocapitalize="none" spellcheck="false">
-      <input id="authPw" type="password" placeholder="비밀번호 4자리 숫자" autocomplete="current-password"
-        inputmode="numeric" pattern="[0-9]*" maxlength="4" oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)">
-      <button id="authBtn" type="submit">시작하기</button>
-    </form>
-    <div id="pinErr"></div>
-    <div class="auth-hint">처음 쓰는 이름이면 셀러가 새로 만들어져요. 같은 이름·비밀번호를 넣으면 둘이 같은 셀러를 봅니다.</div>
+    <div id="authLoading" class="auth-loading">불러오는 중…</div>
+
+    <div id="authForm" style="display:none">
+      <form class="auth-form" onsubmit="submitAuth(event)">
+        <input id="authId" placeholder="셀러 이름" autocomplete="username" autocapitalize="none" spellcheck="false">
+        <input id="authPw" type="password" placeholder="비밀번호 4자리 숫자" autocomplete="current-password"
+          inputmode="numeric" pattern="[0-9]*" maxlength="4" oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)">
+        <button id="authBtn" type="submit">시작하기</button>
+      </form>
+      <div id="pinErr"></div>
+      <div class="auth-hint">처음 쓰는 이름이면 셀러가 새로 만들어져요. 같은 이름·비밀번호를 넣으면 둘이 같은 셀러를 봅니다.</div>
+    </div>
   </div>
 
   <header>
