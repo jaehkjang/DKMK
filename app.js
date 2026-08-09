@@ -393,6 +393,7 @@ function detailFactsHtml(w) {
   if (w['상태'] === '마심') {
     facts.push(['🍷 마신날', w['마신날짜']]);
     facts.push(['⭐ 평점', w['평점'] ? starsHtml(w['평점']) : '']);
+    facts.push(['🔁 재구매 의향', w['재구매의향']]);
     facts.push(['💬 한줄평', w['한줄평']]);
     facts.push(['🍴 함께한 음식', w['함께한음식']]);
   }
@@ -477,13 +478,17 @@ function resetAddForm() {
 }
 
 /* ---------- 마시기 ---------- */
+// 별점(만족도)과는 다른 축이다 — 맛있어도 비싸면 재구매 의향은 낮을 수 있다.
+var REPURCHASE_OPTIONS = ['쟁여두고 싶다', '가격 좋으면 산다', '한 번이면 족하다'];
+var CURRENT_REPURCHASE = '';
+
 function openDrinkModal(r) {
   var w = findWine(r);
-  PENDING_ROW = r; CURRENT_RATING = 5;
+  PENDING_ROW = r; CURRENT_RATING = 5; CURRENT_REPURCHASE = '';
   document.getElementById('drinkTitle').textContent = w ? w['와인명'] : '';
   document.getElementById('drinkComment').value = '';
   document.getElementById('drinkFood').value = '';
-  renderStars(); om('drinkModal');
+  renderStars(); renderRepurchaseChips(); om('drinkModal');
 }
 function renderStars() {
   var el = document.getElementById('starPick');
@@ -496,11 +501,24 @@ function renderStars() {
     el.appendChild(s);
   }
 }
+function renderRepurchaseChips() {
+  var el = document.getElementById('repurchaseChips');
+  el.innerHTML = REPURCHASE_OPTIONS.map(function (o) {
+    return '<button type="button" class="' + (CURRENT_REPURCHASE === o ? 'on' : '') + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(o) + '</button>';
+  }).join('');
+  el.querySelectorAll('button').forEach(function (b, i) {
+    b.onclick = function () {
+      CURRENT_REPURCHASE = (CURRENT_REPURCHASE === REPURCHASE_OPTIONS[i]) ? '' : REPURCHASE_OPTIONS[i];
+      renderRepurchaseChips();
+    };
+  });
+}
 function confirmDrink() {
   var info = {
     '평점': CURRENT_RATING,
     '한줄평': document.getElementById('drinkComment').value,
-    '함께한음식': document.getElementById('drinkFood').value
+    '함께한음식': document.getElementById('drinkFood').value,
+    '재구매의향': CURRENT_REPURCHASE
   };
   callAPI(function () { return API.markDrunk(PENDING_ROW, info); }).then(function (res) {
     if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }

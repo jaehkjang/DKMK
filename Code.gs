@@ -28,7 +28,7 @@
  */
 
 var NEW_COLUMNS = ['어울리는잔', '서빙방법', '와인배경', '평점', '한줄평', '함께한음식', '라벨사진', '소유자',
-  '서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점', '내잔추천', '내잔추천별점', '추천페어링별점'];
+  '서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점', '내잔추천', '내잔추천별점', '추천페어링별점', '재구매의향'];
 var PHOTO_FOLDER_NAME = '와인라벨사진';
 
 /* ===================== API 라우터 ===================== */
@@ -840,6 +840,7 @@ function markDrunk(token, rowIndex, info) {
     if (info['평점'] !== undefined) sheet.getRange(rowIndex, colIndex1_(headers, '평점')).setValue(info['평점']);
     if (info['한줄평']) sheet.getRange(rowIndex, colIndex1_(headers, '한줄평')).setValue(info['한줄평']);
     if (info['함께한음식']) sheet.getRange(rowIndex, colIndex1_(headers, '함께한음식')).setValue(info['함께한음식']);
+    if (info['재구매의향']) sheet.getRange(rowIndex, colIndex1_(headers, '재구매의향')).setValue(info['재구매의향']);
   }
   return { ok: true };
 }
