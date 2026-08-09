@@ -42,7 +42,7 @@ var FOOD_MENU = [
   { label: '분식·야식', children: ['떡볶이', '순대', '튀김', '김밥', '오뎅', '라면'] },
   { label: '족발·보쌈', children: ['족발', '보쌈', '냉채족발', '매운족발'] },
   { label: '한식 찜·탕', children: ['갈비찜', '찜닭', '감자탕', '삼계탕', '육개장', '설렁탕'] },
-  { label: '일식', children: ['초밥', '라멘', '우동', '돈카츠', '야키토리', '규동'] }
+  { label: '일식', children: ['초밥', '라멘', '우동', '돈카츠', '야키토리', '규동', '숙성회'] }
 ];
 var OPEN_FOOD_CAT = null;
 var SELECTED_FOODS = [];
