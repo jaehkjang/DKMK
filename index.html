@@ -169,6 +169,13 @@
         <button class="primary-btn alt" type="submit">잔 추가</button>
       </form>
 
+      <h3 style="margin-top:22px;font-size:15px">와인 정보 채우기</h3>
+      <div style="font-size:12.5px;color:var(--sub);line-height:1.5;margin-bottom:10px">
+        생산지·서빙온도·에어링시간·잔 추천·추천 음식이 비어 있는 와인을 한 번에 AI로 채워요. 이미 채워진 와인은 건드리지 않아요.
+      </div>
+      <button type="button" class="primary-btn alt" onclick="bulkFillWineInfo()">보유 와인 정보 한번에 채우기</button>
+      <div id="bulkFillStatus" style="font-size:12.5px;color:var(--sub);margin-top:8px"></div>
+
       <button class="more-toggle" onclick="cm('settingsModal')">닫기</button>
     </div>
   </div>
