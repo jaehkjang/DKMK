@@ -608,19 +608,56 @@ function toggleMore() {
   document.getElementById('moreLabel').textContent = m.classList.contains('on') ? '− 접기' : '＋ 자세히 입력';
 }
 
-/* ---------- 사진 ---------- */
+/* ---------- 사진 ----------
+ * 폰 카메라 원본은 보통 몇 MB나 돼서, 그대로 보내면 AI 인식(recognizeLabel)과
+ * 저장(addWine)에 매번 그 큰 용량을 두 번 실어 날라야 해서 느리다. 캔버스로
+ * 줄이고 압축해서 보내면 라벨 글자를 읽는 데는 지장 없으면서 훨씬 빠르다.
+ */
 function onPhoto(e, mode) {
   var f = e.target.files[0]; if (!f) return;
-  var rd = new FileReader();
-  rd.onload = function () {
-    PHOTO_DATAURL = rd.result;
-    document.getElementById('photoPreview').innerHTML = '<img src="' + rd.result + '">';
-    var note = document.getElementById('photoNote');
+  e.target.value = '';
+  var note = document.getElementById('photoNote');
+  note.innerHTML = '<div class="note">📖 사진 준비 중…</div>';
+  // 셀러 사진은 병이 여러 개라 조금 더 크게 남겨야 각 라벨 글자가 읽힌다
+  var maxDim = mode === 'all' ? 1600 : 1280;
+  compressImage(f, maxDim, 0.85).then(function (dataUrl) {
+    PHOTO_DATAURL = dataUrl;
+    document.getElementById('photoPreview').innerHTML = '<img src="' + dataUrl + '">';
     note.innerHTML = '<div class="note">📖 라벨 읽는 중…</div>';
     if (mode === 'one') recognizeOne(note); else recognizeAll(note);
-  };
-  rd.readAsDataURL(f);
-  e.target.value = '';
+  }).catch(function () {
+    // 압축이 안 되는 환경이면 원본이라도 그대로 쓴다(느리더라도 동작은 하게)
+    var rd = new FileReader();
+    rd.onload = function () {
+      PHOTO_DATAURL = rd.result;
+      document.getElementById('photoPreview').innerHTML = '<img src="' + rd.result + '">';
+      note.innerHTML = '<div class="note">📖 라벨 읽는 중…</div>';
+      if (mode === 'one') recognizeOne(note); else recognizeAll(note);
+    };
+    rd.readAsDataURL(f);
+  });
+}
+
+/** 이미지를 maxDim(긴 변 기준) 이하로 줄이고 JPEG로 압축해 데이터 URL로 반환 */
+function compressImage(file, maxDim, quality) {
+  return new Promise(function (resolve, reject) {
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      var cw = Math.max(1, Math.round(img.width * scale));
+      var ch = Math.max(1, Math.round(img.height * scale));
+      var canvas = document.createElement('canvas');
+      canvas.width = cw; canvas.height = ch;
+      var ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('canvas 미지원')); return; }
+      ctx.drawImage(img, 0, 0, cw, ch);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('이미지를 불러오지 못했어요')); };
+    img.src = url;
+  });
 }
 
 function recognizeOne(note) {
