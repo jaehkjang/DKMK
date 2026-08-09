@@ -106,8 +106,56 @@ function openSettings() {
   document.getElementById('pwOld').value = '';
   document.getElementById('pwNew').value = '';
   document.getElementById('pwErr').textContent = '';
+  if (!BULK_FILL_RUNNING) document.getElementById('bulkFillStatus').textContent = '';
   loadGlasses();
   om('settingsModal');
+}
+
+/**
+ * 이미 등록된 와인 중 서빙온도·완벽한잔·추천 페어링·생산지가 비어 있는 것들을
+ * suggestWineInfo로 한 번에 채운다. 한꺼번에 다 요청하면 API 한도에 걸리기
+ * 쉬워서 하나씩 순서대로 부르고, 몇 개째인지 상태 줄에 보여준다.
+ */
+var BULK_FILL_RUNNING = false;
+function bulkFillWineInfo() {
+  if (BULK_FILL_RUNNING) return;
+  var status = document.getElementById('bulkFillStatus');
+
+  function start(wines) {
+    var targets = wines.filter(function (w) {
+      return !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['생산지/국가'];
+    });
+    if (!targets.length) { status.textContent = '이미 다 채워져 있어요 ✨'; return; }
+
+    BULK_FILL_RUNNING = true;
+    var i = 0;
+    function next() {
+      if (i >= targets.length) {
+        BULK_FILL_RUNNING = false;
+        status.textContent = targets.length + '병 업데이트 완료 ✨';
+        load();
+        return;
+      }
+      var w = targets[i];
+      status.textContent = '업데이트 중… (' + (i + 1) + '/' + targets.length + ') ' + w['와인명'];
+      callAPI(function () { return API.suggestWineInfo(w.rowIndex); }).then(function () {
+        i++;
+        next();
+      });
+    }
+    next();
+  }
+
+  if (WINES_LOADED) {
+    start(ALL_WINES);
+  } else {
+    status.textContent = '불러오는 중…';
+    callAPI(function () { return API.getWines(); }).then(function (d) {
+      if (!d || d.error) { status.textContent = '실패: ' + ((d && d.error) || ''); return; }
+      ALL_WINES = d.wines; WINES_LOADED = true;
+      start(ALL_WINES);
+    });
+  }
 }
 
 /* ---------- 내 잔 관리 ---------- */
