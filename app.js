@@ -5,8 +5,9 @@
 // ============================================================
 
 var ALL_WINES = [], SEG = '보유', PENDING_ROW = null, CURRENT_RATING = 5;
-var PHOTO_DATAURL = null, PICKS = [], PICK_ON = {}, SELECTED_TYPE = '';
+var PHOTO_DATAURL = null, PHOTO_UPLOADED_URL = null, PICKS = [], PICK_ON = {}, SELECTED_TYPE = '';
 var TOKEN = '', ME = '', EDIT_ROW = null, DETAIL_ROW = null;
+var WINES_LOADED = false; // 탭을 오갈 때마다 매번 서버에 다시 안 물어보려고 세션 동안 캐시
 
 var TYPES = [
   { n:'레드',        c:'#8C1D33', s:'#F7E9EC' },
@@ -250,7 +251,10 @@ function showPage(p) {
   document.querySelectorAll('#tabbar div').forEach(function (t) { t.classList.toggle('on', t.dataset.p === p); });
   document.getElementById('pgTitle').textContent = TITLES[p];
   document.getElementById('pgCount').textContent = '';
-  if (p === 'Cellar') { load(); }
+  // 이미 한 번 불러온 목록이 있으면 탭을 다시 눌러도 서버를 다시 안 부르고
+  // 캐시로 즉시 그린다 — 매번 왕복하느라 느려지는 걸 막는다. 실제로 데이터가
+  // 바뀌는 동작(추가/수정/삭제/마시기 등)은 각자 끝나고 load()를 다시 부른다.
+  if (p === 'Cellar') { if (WINES_LOADED) renderList(); else load(); }
   if (p === 'Stat') loadStats();
   if (p === 'Food') renderCellarPairingChips();
   window.scrollTo(0, 0);
@@ -262,7 +266,7 @@ function load() {
       document.getElementById('listArea').innerHTML = '<div class="empty"><span class="big">😵</span>불러오지 못했어요<br>' + esc(d && d.error) + '</div>';
       return;
     }
-    ALL_WINES = d.wines; renderList();
+    ALL_WINES = d.wines; WINES_LOADED = true; renderList();
   });
 }
 
@@ -444,7 +448,7 @@ function startEdit(r) {
   document.getElementById('moreFields').classList.add('on');
   document.getElementById('moreLabel').textContent = '− 접기';
   document.getElementById('similarHint').innerHTML = '';
-  PHOTO_DATAURL = null;
+  PHOTO_DATAURL = null; PHOTO_UPLOADED_URL = null;
   document.getElementById('photoPreview').innerHTML = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '">' : '';
   document.getElementById('photoNote').innerHTML = '<div class="note">사진을 새로 찍으면 라벨 사진이 교체돼요. 그대로 두면 기존 사진이 유지돼요</div>';
   document.getElementById('addForm').style.display = '';
@@ -465,7 +469,7 @@ function resetAddForm() {
   EDIT_ROW = null;
   document.querySelectorAll('#addForm input, #addForm textarea').forEach(function (el) { el.value = ''; });
   document.querySelectorAll('#typeChips button').forEach(function (x) { x.classList.remove('on'); });
-  SELECTED_TYPE = ''; PHOTO_DATAURL = null;
+  SELECTED_TYPE = ''; PHOTO_DATAURL = null; PHOTO_UPLOADED_URL = null;
   document.getElementById('similarHint').innerHTML = '';
   document.getElementById('photoPreview').innerHTML = '';
   document.getElementById('photoNote').innerHTML = '';
@@ -616,6 +620,7 @@ function toggleMore() {
 function onPhoto(e, mode) {
   var f = e.target.files[0]; if (!f) return;
   e.target.value = '';
+  PHOTO_UPLOADED_URL = null; // 새 사진을 골랐으니 전에 올려둔 URL은 더 이상 안 맞다
   var note = document.getElementById('photoNote');
   note.innerHTML = '<div class="note">📖 사진 준비 중…</div>';
   // 셀러 사진은 병이 여러 개라 조금 더 크게 남겨야 각 라벨 글자가 읽힌다
@@ -667,6 +672,9 @@ function recognizeOne(note) {
       return;
     }
     note.innerHTML = '<div class="note">✨ 자동으로 채웠어요. 확인하고 고쳐주세요</div>';
+    // 인식할 때 서버가 사진을 이미 올려뒀으면 그 URL을 기억해뒀다가 저장할 때
+    // 재사용한다 — 같은 사진을 또 업로드하지 않아도 된다.
+    if (g['_photoUrl']) PHOTO_UPLOADED_URL = g['_photoUrl'];
     if (g['와인명']) document.getElementById('f_와인명').value = g['와인명'];
     if (g['품종']) document.getElementById('f_품종').value = g['품종'];
     if (g['빈티지']) document.getElementById('f_빈티지').value = g['빈티지'];
@@ -764,10 +772,13 @@ function submitAdd(e) {
   if (!data['와인명']) { toast('와인 이름을 적어주세요'); return; }
 
   var editing = EDIT_ROW !== null;
+  // 인식할 때 사진을 이미 올려뒀으면(PHOTO_UPLOADED_URL) 그 주소를 그대로 쓰고,
+  // 아니면(직접입력·인식 실패 등) 원본 데이터를 지금 올린다.
+  var photo = PHOTO_UPLOADED_URL || PHOTO_DATAURL;
   var btn = document.getElementById('addBtn');
   btn.disabled = true; btn.textContent = editing ? '수정하는 중…' : '담는 중…';
   callAPI(function () {
-    return editing ? API.updateWine(EDIT_ROW, data, PHOTO_DATAURL) : API.addWine(data, PHOTO_DATAURL);
+    return editing ? API.updateWine(EDIT_ROW, data, photo) : API.addWine(data, photo);
   }).then(function (res) {
     if (!res || res.error) {
       toast('실패: ' + ((res && res.error) || ''));
@@ -826,37 +837,86 @@ function runRecommend(food) {
 }
 
 /* ---------- 기록 ---------- */
+/**
+ * 기록(통계)은 getWines가 이미 내려준 것과 같은 데이터로 계산할 수 있어서
+ * (서버 getStats도 내부적으로 getWines부터 다시 부른다) 캐시가 있으면
+ * 서버를 또 부르지 않고 그 자리에서 바로 계산한다.
+ */
 function loadStats() {
   var area = document.getElementById('statArea');
-  area.innerHTML = '<div class="loading">불러오는 중…</div>';
-  callAPI(function () { return API.getStats(); }).then(function (s) {
-    if (!s || s.error) {
-      area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(s && s.error) + '</div>';
-      return;
-    }
-    if (!s.totalDrunk) {
-      area.innerHTML = '<div class="empty"><span class="big">📊</span>마신 와인이 쌓이면<br>여기에 기록이 보여요</div>';
-      return;
-    }
-    function sect(title, obj, colorByType) {
-      var es = Object.keys(obj).map(function (k) { return [k, obj[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
-      var max = es.reduce(function (m, e) { return Math.max(m, e[1]); }, 1);
-      return '<div class="sect">' + title + '</div>' + es.map(function (e) {
-        var c = colorByType ? typeStyle(e[0]).c : 'var(--wine)';
-        return '<div class="bar-row"><div class="k">' + esc(e[0]) + '</div>' +
-          '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:' + c + ';width:' + (e[1] / max * 100) + '%"></div></div>' +
-          '<div class="n">' + e[1] + '</div></div></div>';
-      }).join('');
-    }
-    area.innerHTML =
-      '<div class="hero"><div class="n">' + s.totalDrunk + '</div><div class="l">지금까지 마신 와인</div></div>' +
-      sect('종류별', s.byType, true) +
-      sect('품종별', s.byGrape, false) +
-      sect('월별', s.byMonth, false) +
-      sect('가격대별', s.byPrice, false) +
-      '<div style="text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--sub)">' +
-      '🍷 ' + esc(ME) + ' 셀러</div>';
+  if (!WINES_LOADED) {
+    area.innerHTML = '<div class="loading">불러오는 중…</div>';
+    callAPI(function () { return API.getWines(); }).then(function (d) {
+      if (!d || d.error) {
+        area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(d && d.error) + '</div>';
+        return;
+      }
+      ALL_WINES = d.wines; WINES_LOADED = true;
+      renderStats();
+    });
+    return;
+  }
+  renderStats();
+}
+
+/** "품종" 필드에서 개별 품종 이름만 뽑아낸다(블렌드는 각 품종에 1씩). Code.gs parseGrapes_와 동일 로직. */
+function parseGrapesClient(raw) {
+  return String(raw || '')
+    .split(/[·,、]/)
+    .map(function (s) { return s.replace(/\d+(\.\d+)?\s*%/g, '').replace(/[()]/g, '').trim(); })
+    .filter(Boolean);
+}
+
+function computeStats(wines) {
+  var drunk = wines.filter(function (w) { return w['상태'] === '마심'; });
+  var byMonth = {}, byType = {}, byGrape = {}, byPrice = {};
+  drunk.forEach(function (w) {
+    var month = (w['마신날짜'] || '').slice(0, 7);
+    if (month) byMonth[month] = (byMonth[month] || 0) + 1;
+
+    var type = w['종류'] || '기타';
+    byType[type] = (byType[type] || 0) + 1;
+
+    var grapes = parseGrapesClient(w['품종']);
+    if (!grapes.length) grapes = ['품종 미상'];
+    grapes.forEach(function (g) { byGrape[g] = (byGrape[g] || 0) + 1; });
+
+    var priceNum = parseInt(String(w['평균가격(국내·원)'] || '').replace(/[^0-9]/g, ''), 10);
+    var bracket = !priceNum ? '가격정보없음'
+      : priceNum < 30000 ? '3만원 미만'
+      : priceNum < 70000 ? '3~7만원'
+      : priceNum < 150000 ? '7~15만원'
+      : '15만원 이상';
+    byPrice[bracket] = (byPrice[bracket] || 0) + 1;
   });
+  return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byGrape: byGrape, byPrice: byPrice };
+}
+
+function renderStats() {
+  var area = document.getElementById('statArea');
+  var s = computeStats(ALL_WINES);
+  if (!s.totalDrunk) {
+    area.innerHTML = '<div class="empty"><span class="big">📊</span>마신 와인이 쌓이면<br>여기에 기록이 보여요</div>';
+    return;
+  }
+  function sect(title, obj, colorByType) {
+    var es = Object.keys(obj).map(function (k) { return [k, obj[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
+    var max = es.reduce(function (m, e) { return Math.max(m, e[1]); }, 1);
+    return '<div class="sect">' + title + '</div>' + es.map(function (e) {
+      var c = colorByType ? typeStyle(e[0]).c : 'var(--wine)';
+      return '<div class="bar-row"><div class="k">' + esc(e[0]) + '</div>' +
+        '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:' + c + ';width:' + (e[1] / max * 100) + '%"></div></div>' +
+        '<div class="n">' + e[1] + '</div></div></div>';
+    }).join('');
+  }
+  area.innerHTML =
+    '<div class="hero"><div class="n">' + s.totalDrunk + '</div><div class="l">지금까지 마신 와인</div></div>' +
+    sect('종류별', s.byType, true) +
+    sect('품종별', s.byGrape, false) +
+    sect('월별', s.byMonth, false) +
+    sect('가격대별', s.byPrice, false) +
+    '<div style="text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--sub)">' +
+    '🍷 ' + esc(ME) + ' 셀러</div>';
 }
 
 renderTypeChips();

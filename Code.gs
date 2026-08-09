@@ -473,10 +473,7 @@ function addWine(token, data, photoDataUrl) {
   var me = String(requireUser_(token)['아이디']);
   var sheet = getSheet_();
   var headers = getHeaders_();
-  var photoUrl = '';
-  if (photoDataUrl) {
-    photoUrl = savePhoto_(photoDataUrl, (data && data['와인명']) || 'wine');
-  }
+  var photoUrl = photoDataUrl ? resolvePhotoUrl_(photoDataUrl, (data && data['와인명']) || 'wine') : '';
   var row = headers.map(function (h) {
     if (h === '상태') return '보유';
     if (h === '등록일') return todayStr_();
@@ -504,10 +501,20 @@ function updateWine(token, rowIndex, data, photoDataUrl) {
     sheet.getRange(rowIndex, colIndex1_(headers, h)).setValue(data[h]);
   });
   if (photoDataUrl) {
-    var photoUrl = savePhoto_(photoDataUrl, (data && data['와인명']) || 'wine');
+    var photoUrl = resolvePhotoUrl_(photoDataUrl, (data && data['와인명']) || 'wine');
     sheet.getRange(rowIndex, colIndex1_(headers, '라벨사진')).setValue(photoUrl);
   }
   return { ok: true };
+}
+
+/**
+ * recognizeLabel이 인식과 동시에 이미 드라이브에 올려서 URL을 돌려준 경우,
+ * addWine/updateWine에서 같은 사진을 또 업로드하지 않고 그 URL을 그대로 쓴다.
+ * (원본 data: URL이 왔으면 지금 새로 업로드한다 — 직접입력·수정 시 새 사진 등)
+ */
+function resolvePhotoUrl_(photoDataUrl, name) {
+  if (/^https?:\/\//.test(photoDataUrl)) return photoDataUrl;
+  return savePhoto_(photoDataUrl, name);
 }
 
 /** 실수로 등록한 와인 삭제. */
@@ -645,6 +652,22 @@ function suggestWineInfo(token, rowIndex) {
   return out;
 }
 
+/**
+ * 사진 폴더를 매번 이름으로 검색하면(DriveApp.getFoldersByName) 느리다.
+ * 한 번 찾은 폴더 ID를 스크립트 속성에 저장해두고 다음부터는 ID로 바로 연다.
+ */
+function photoFolder_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('PHOTO_FOLDER_ID');
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (err) { /* 폴더가 지워졌으면 아래에서 새로 찾는다 */ }
+  }
+  var folders = DriveApp.getFoldersByName(PHOTO_FOLDER_NAME);
+  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(PHOTO_FOLDER_NAME);
+  props.setProperty('PHOTO_FOLDER_ID', folder.getId());
+  return folder;
+}
+
 function savePhoto_(dataUrl, name) {
   var m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl);
   if (!m) throw new Error('잘못된 이미지 형식입니다');
@@ -652,8 +675,7 @@ function savePhoto_(dataUrl, name) {
   var base64 = m[2];
   var blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, name + '_' + Date.now());
 
-  var folders = DriveApp.getFoldersByName(PHOTO_FOLDER_NAME);
-  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(PHOTO_FOLDER_NAME);
+  var folder = photoFolder_();
   var file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   // drive.google.com/uc?id=... 는 <img>로 바로 못 띄우는 경우가 많아졌다(바이러스 검사
@@ -726,7 +748,19 @@ function recognizeLabel(token, photoDataUrl) {
     '일반적으로 알려진 정보라면 네 와인 지식으로 채워 넣어라(예: 프랑스 "Chablis"면 화이트/샤르도네/프랑스). ' +
     '그래도 전혀 짐작이 안 가면 빈 문자열로 둬라. ' +
     '와인명은 라벨에 적힌 원문 표기(주로 영문/이탈리아어 등)를 그대로 쓰고, 종류·품종·생산지는 한국어로 쓰세요.';
-  return callGemini_([{ text: prompt }, imagePart_(photoDataUrl)]);
+  var result = callGemini_([{ text: prompt }, imagePart_(photoDataUrl)]);
+  // 인식 성공 시 사진을 여기서 미리 드라이브에 올려둔다. 그러면 나중에
+  // addWine/updateWine에 이 URL을 그대로 넘겨서, 같은 사진을 두 번(인식할 때·
+  // 저장할 때) 안 실어 날라도 된다 — 와인 추가 체감 속도의 절반은 이 중복 업로드였다.
+  if (result && !result.error) {
+    try {
+      result._photoUrl = savePhoto_(photoDataUrl, result['와인명'] || 'wine');
+    } catch (err) {
+      // 사진 저장이 실패해도 인식 결과 자체는 그대로 돌려준다.
+      // addWine이 원본 데이터를 받으면 그때 다시 시도된다.
+    }
+  }
+  return result;
 }
 
 /**
