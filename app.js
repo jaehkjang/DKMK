@@ -123,7 +123,8 @@ function bulkFillWineInfo() {
 
   function start(wines) {
     var targets = wines.filter(function (w) {
-      return !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['생산지/국가'];
+      return !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['생산지/국가'] ||
+        !w['와인배경'] || !w['평균가격(국내·원)'];
     });
     if (!targets.length) { status.textContent = '이미 다 채워져 있어요 ✨'; return; }
 
@@ -387,7 +388,8 @@ function openDetail(r) {
   // 아래 중 하나라도 비어 있으면 AI로 한 번에 보충한다. 응답이 와도 결과만 반영하고
   // (품종/생산지처럼 AI도 끝내 못 알아낼 수 있는 필드가 있으니) 다시 조회하지 않는다 —
   // 그렇지 않으면 계속 비어 있는 채로 매번 재호출되는 무한 루프가 될 수 있다.
-  var needSuggest = !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['품종'] || !w['생산지/국가'];
+  var needSuggest = !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['품종'] || !w['생산지/국가'] ||
+    !w['와인배경'] || !w['평균가격(국내·원)'];
   var photo = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '" style="width:100%;border-radius:14px;margin:14px 0 4px;">' : '';
   var t = typeStyle(w['종류']);
   document.getElementById('detailBody').innerHTML =
@@ -412,7 +414,8 @@ function openDetail(r) {
         return;
       }
       ['품종', '생산지/국가', '서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점',
-        '내잔추천', '내잔추천별점', '추천 페어링', '추천페어링별점'].forEach(function (k) {
+        '내잔추천', '내잔추천별점', '추천 페어링', '추천페어링별점',
+        '와인배경', '평균가격(국내·원)'].forEach(function (k) {
         if (res[k]) w[k] = res[k];
       });
       var factsEl = document.getElementById('detailFacts');
