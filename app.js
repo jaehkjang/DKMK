@@ -123,7 +123,7 @@ function bulkFillWineInfo() {
 
   function start(wines) {
     var targets = wines.filter(function (w) {
-      return !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['생산지/국가'] ||
+      return !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['베스트페어링'] || !w['생산지/국가'] ||
         !w['와인배경'] || !w['평균가격(국내·원)'];
     });
     if (!targets.length) { status.textContent = '이미 다 채워져 있어요 ✨'; return; }
@@ -388,7 +388,7 @@ function openDetail(r) {
   // 아래 중 하나라도 비어 있으면 AI로 한 번에 보충한다. 응답이 와도 결과만 반영하고
   // (품종/생산지처럼 AI도 끝내 못 알아낼 수 있는 필드가 있으니) 다시 조회하지 않는다 —
   // 그렇지 않으면 계속 비어 있는 채로 매번 재호출되는 무한 루프가 될 수 있다.
-  var needSuggest = !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['품종'] || !w['생산지/국가'] ||
+  var needSuggest = !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['베스트페어링'] || !w['품종'] || !w['생산지/국가'] ||
     !w['와인배경'] || !w['평균가격(국내·원)'];
   var photo = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '" style="width:100%;border-radius:14px;margin:14px 0 4px;">' : '';
   var t = typeStyle(w['종류']);
@@ -415,6 +415,7 @@ function openDetail(r) {
       }
       ['품종', '생산지/국가', '서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점',
         '내잔추천', '내잔추천별점', '추천 페어링', '추천페어링별점',
+        '베스트페어링', '베스트페어링별점',
         '와인배경', '평균가격(국내·원)'].forEach(function (k) {
         if (res[k]) w[k] = res[k];
       });
@@ -464,7 +465,8 @@ function servingFactsHtml(w) {
   if (w['에어링시간']) rows.push(['⏱ 에어링 시간', w['에어링시간']]);
   if (w['완벽한잔']) rows.push(['🥂 완벽한 잔', w['완벽한잔'] + ' ' + starsHtml(w['완벽한잔별점'])]);
   if (w['내잔추천']) rows.push(['🍷 내 잔 추천', w['내잔추천'] + ' ' + starsHtml(w['내잔추천별점'])]);
-  if (w['추천 페어링']) rows.push(['🍽 추천 음식', w['추천 페어링'] + (w['추천페어링별점'] ? ' ' + starsHtml(w['추천페어링별점']) : '')]);
+  if (w['베스트페어링']) rows.push(['🍽 베스트 페어링', w['베스트페어링'] + (w['베스트페어링별점'] ? ' ' + starsHtml(w['베스트페어링별점']) : '')]);
+  if (w['추천 페어링']) rows.push(['🇰🇷 한국 추천 음식', w['추천 페어링'] + (w['추천페어링별점'] ? ' ' + starsHtml(w['추천페어링별점']) : '')]);
   if (!rows.length) return '';
   return '<div class="facts" style="margin-top:0">' + rows.map(function (f) {
     return '<div class="fact"><div class="k">' + f[0] + '</div><div class="v">' + esc(f[1]) + '</div></div>';
@@ -652,7 +654,8 @@ function renderQuickFoods() {
 function cellarPairingKeywords() {
   var set = {};
   ALL_WINES.forEach(function (w) {
-    var text = String(w['추천 페어링'] || '').replace(/베스트\s*:/g, '').replace(/한국\s*:/g, '');
+    var text = (String(w['추천 페어링'] || '') + ',' + String(w['베스트페어링'] || ''))
+      .replace(/베스트\s*:/g, '').replace(/한국\s*:/g, '');
     text.split(/[·,\/]+/).forEach(function (part) {
       var t = part.trim();
       if (t && t.length <= 10 && !/[.!?]/.test(t)) set[t] = true;
@@ -950,7 +953,8 @@ function computeStats(wines) {
     if (!grapes.length) grapes = ['품종 미상'];
     grapes.forEach(function (g) { byGrape[g] = (byGrape[g] || 0) + 1; });
 
-    var priceNum = parseInt(String(w['평균가격(국내·원)'] || '').replace(/[^0-9]/g, ''), 10);
+    var priceMatch = String(w['평균가격(국내·원)'] || '').match(/[\d,]+/);
+    var priceNum = priceMatch ? parseInt(priceMatch[0].replace(/,/g, ''), 10) : 0;
     var bracket = !priceNum ? '가격정보없음'
       : priceNum < 30000 ? '3만원 미만'
       : priceNum < 70000 ? '3~7만원'
