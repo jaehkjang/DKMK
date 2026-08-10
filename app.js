@@ -108,7 +108,6 @@ function submitAuth(ev) {
 }
 
 function openSettings() {
-  document.getElementById('pwOld').value = '';
   document.getElementById('pwNew').value = '';
   document.getElementById('pwNew2').value = '';
   document.getElementById('pwErr').textContent = '';
@@ -210,12 +209,11 @@ function removeGlass(rowIndex) {
 
 function submitChangePw(e) {
   e.preventDefault();
-  var oldPw = document.getElementById('pwOld').value;
   var newPw = document.getElementById('pwNew').value;
   var newPw2 = document.getElementById('pwNew2').value;
   var err = document.getElementById('pwErr');
   err.textContent = '';
-  if (!/^\d{4}$/.test(oldPw) || !/^\d{4}$/.test(newPw)) {
+  if (!/^\d{4}$/.test(newPw)) {
     err.textContent = '비밀번호는 4자리 숫자로 입력해주세요';
     return;
   }
@@ -223,9 +221,8 @@ function submitChangePw(e) {
     err.textContent = '새 비밀번호 확인이 일치하지 않아요';
     return;
   }
-  callAPI(function () { return API.changePassword(oldPw, newPw); }).then(function (res) {
+  callAPI(function () { return API.changePassword(newPw); }).then(function (res) {
     if (!res || res.error) { err.textContent = (res && res.error) || '문제가 생겼어요'; return; }
-    document.getElementById('pwOld').value = '';
     document.getElementById('pwNew').value = '';
     document.getElementById('pwNew2').value = '';
     toast('비밀번호를 바꿨어요 🔒');
