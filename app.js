@@ -26,26 +26,31 @@ function typeStyle(t) {
 }
 
 /**
- * 음식 빠른 선택. 종류가 많은 카테고리는 하위 메뉴로 세분화한다.
- * children이 없으면 그 자체가 바로 선택되는 음식이고, 있으면 하위 칩을 펼친다.
- * 칩은 여러 개 골라도 되는 다중 선택이라(SELECTED_FOODS), 오늘 먹는 음식이 여럿이면
- * 다 같이 어울리는 와인을 찾아준다.
+ * 음식 빠른 선택. 대분류(요리 문화권)로 나누고, 그 아래 세부 음식을 펼친다.
+ * "양식"처럼 나라별로 더 나뉘는 대분류는 children 안에 또 {label, children}을 넣어
+ * 한 단계 더 펼칠 수 있다(문자열이면 바로 고를 수 있는 음식, 객체면 더 펼쳐야 하는
+ * 하위 분류). 칩은 여러 개 골라도 되는 다중 선택이라(SELECTED_FOODS), 오늘 먹는
+ * 음식이 여럿이면 다 같이 어울리는 와인을 찾아준다.
  */
 var FOOD_MENU = [
-  { label: '삼겹살' },
-  { label: '스테이크' },
-  { label: '회' },
-  { label: '햄버거', children: ['치즈버거', '불고기버거', '베이컨버거', '더블패티버거'] },
-  { label: '치킨', children: ['후라이드', '양념치킨', '간장치킨', '마늘치킨', '핫윙', '순살치킨'] },
-  { label: '파스타', children: ['토마토파스타', '오일파스타', '버터베이스파스타', '크림파스타', '로제파스타', '봉골레파스타', '해산물파스타', '버섯파스타', '미트소스파스타'] },
-  { label: '치즈', children: ['브리치즈', '까망베르', '체다치즈', '블루치즈', '고다치즈', '파르미지아노'] },
+  { label: '한식', children: [
+    '삼겹살', '족발', '보쌈', '갈비찜', '찜닭', '감자탕', '삼계탕', '육개장', '설렁탕',
+    '후라이드치킨', '양념치킨', '간장치킨', '마늘치킨', '핫윙', '순살치킨',
+    '떡볶이', '순대', '튀김', '김밥', '오뎅', '라면'
+  ] },
   { label: '중식', children: ['짜장면', '짬뽕', '탕수육', '마파두부', '깐풍기', '양장피'] },
-  { label: '분식·야식', children: ['떡볶이', '순대', '튀김', '김밥', '오뎅', '라면'] },
-  { label: '족발·보쌈', children: ['족발', '보쌈', '냉채족발', '매운족발'] },
-  { label: '한식 찜·탕', children: ['갈비찜', '찜닭', '감자탕', '삼계탕', '육개장', '설렁탕'] },
-  { label: '일식', children: ['초밥', '라멘', '우동', '돈카츠', '야키토리', '규동', '숙성회'] }
+  { label: '일식', children: ['초밥', '회', '숙성회', '라멘', '우동', '돈카츠', '야키토리', '규동'] },
+  { label: '양식', children: [
+    { label: '이탈리안', children: ['토마토파스타', '오일파스타', '크림파스타', '로제파스타', '봉골레파스타', '해산물파스타', '버섯파스타', '미트소스파스타', '피자', '리조또', '파르미지아노'] },
+    { label: '미국', children: ['스테이크', '햄버거', '치즈버거', '불고기버거', '베이컨버거', '더블패티버거', '바비큐립', '체다치즈', '고다치즈'] },
+    { label: '프랑스', children: ['코코뱅', '부야베스', '에스카르고', '브리치즈', '까망베르', '블루치즈'] },
+    { label: '독일', children: ['학센', '소시지', '슈니첼', '자우어크라우트'] },
+    { label: '스페인', children: ['하몽', '타파스', '빠에야', '감바스'] }
+  ] },
+  { label: '아시안음식', children: ['팟타이', '똠얌꿍', '쌀국수', '반미', '나시고랭', '그린커리'] },
+  { label: '중동음식', children: ['후무스', '케밥', '샤와르마', '팔라펠'] }
 ];
-var OPEN_FOOD_CAT = null;
+var OPEN_PATH = [];
 var SELECTED_FOODS = [];
 
 /* ---------- 헬퍼 ---------- */
@@ -616,33 +621,47 @@ function toggleFoodSelection(label) {
 function renderQuickFoods() {
   var el = document.getElementById('foodQuick');
   el.innerHTML = FOOD_MENU.map(function (item) {
-    var hasKids = item.children && item.children.length;
-    var isOpen = OPEN_FOOD_CAT === item.label;
-    var isSelected = !hasKids && SELECTED_FOODS.indexOf(item.label) !== -1;
-    var arrow = hasKids ? (isOpen ? ' ▲' : ' ▼') : '';
-    return '<button type="button" class="' + (isOpen || isSelected ? 'on' : '') + '" data-cat="' + esc(item.label) + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(item.label) + arrow + '</button>';
+    var isOpen = OPEN_PATH[0] === item.label;
+    var arrow = isOpen ? ' ▲' : ' ▼';
+    return '<button type="button" class="' + (isOpen ? 'on' : '') + '" data-cat="' + esc(item.label) + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(item.label) + arrow + '</button>';
   }).join('');
   el.querySelectorAll('button').forEach(function (b) {
-    var item = FOOD_MENU.filter(function (f) { return f.label === b.dataset.cat; })[0];
     b.onclick = function () {
-      if (item.children && item.children.length) {
-        OPEN_FOOD_CAT = (OPEN_FOOD_CAT === item.label) ? null : item.label;
-        renderQuickFoods();
-      } else {
-        toggleFoodSelection(item.label);
-      }
+      var label = b.dataset.cat;
+      OPEN_PATH = (OPEN_PATH[0] === label) ? [] : [label];
+      renderQuickFoods();
     };
   });
 
   var sub = document.getElementById('foodSub');
-  var open = FOOD_MENU.filter(function (f) { return f.label === OPEN_FOOD_CAT; })[0];
-  if (!open) { sub.innerHTML = ''; return; }
-  sub.innerHTML = open.children.map(function (c) {
-    var isSelected = SELECTED_FOODS.indexOf(c) !== -1;
-    return '<button type="button" class="' + (isSelected ? 'on' : '') + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(c) + '</button>';
+  // 열려 있는 경로를 따라가며 지금 보여줄 하위 목록을 찾는다.
+  var list = FOOD_MENU;
+  for (var i = 0; i < OPEN_PATH.length; i++) {
+    var found = list.filter(function (c) { return typeof c === 'object' && c.label === OPEN_PATH[i]; })[0];
+    if (!found) { list = null; break; }
+    list = found.children;
+  }
+  if (!list) { sub.innerHTML = ''; return; }
+
+  var backBtn = OPEN_PATH.length > 1
+    ? '<button type="button" data-back="1" style="--c:var(--sub);--c-soft:var(--line)">← 뒤로</button>' : '';
+  sub.innerHTML = backBtn + list.map(function (c) {
+    var isObj = typeof c === 'object';
+    var label = isObj ? c.label : c;
+    var isOpen = isObj && OPEN_PATH[OPEN_PATH.length - 1] === label && OPEN_PATH.length > 1;
+    var isSelected = !isObj && SELECTED_FOODS.indexOf(label) !== -1;
+    var arrow = isObj ? (isOpen ? ' ▲' : ' ▼') : '';
+    return '<button type="button" class="' + (isOpen || isSelected ? 'on' : '') + '" data-sub="' + esc(label) + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(label) + arrow + '</button>';
   }).join('');
-  sub.querySelectorAll('button').forEach(function (b) {
-    b.onclick = function () { toggleFoodSelection(b.textContent); };
+  var backEl = sub.querySelector('[data-back]');
+  if (backEl) backEl.onclick = function () { OPEN_PATH = [OPEN_PATH[0]]; renderQuickFoods(); };
+  sub.querySelectorAll('[data-sub]').forEach(function (b) {
+    var label = b.dataset.sub;
+    var node = list.filter(function (c) { return typeof c === 'object' && c.label === label; })[0];
+    b.onclick = function () {
+      if (node) { OPEN_PATH = [OPEN_PATH[0], label]; renderQuickFoods(); }
+      else toggleFoodSelection(label);
+    };
   });
 }
 
@@ -866,14 +885,8 @@ function submitAdd(e) {
 
 /* ---------- 추천 ---------- */
 function doRecommend() {
-  var food = document.getElementById('foodInput').value.trim();
-  if (!food) { toast('뭘 드실지 적어주세요'); return; }
-  // 입력창을 손으로 고쳤으면(칩으로 고른 것과 달라졌으면) 칩 선택 표시를 지운다
-  if (food !== SELECTED_FOODS.join('·')) {
-    SELECTED_FOODS = [];
-    renderQuickFoods();
-    renderCellarPairingChips();
-  }
+  var food = SELECTED_FOODS.join('·');
+  if (!food) { toast('먼저 음식을 골라주세요'); return; }
   runRecommend(food);
 }
 
@@ -965,6 +978,43 @@ function computeStats(wines) {
   return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byGrape: byGrape, byPrice: byPrice };
 }
 
+/**
+ * 같은 와인(이름 기준)을 두 번 이상 마셨으면(재구매) 마실 때마다의 평점을 시간순으로 모은다.
+ * 한 병씩 마실 때마다 새 행으로 기록되니, 이름이 같은 "마심" 행이 여럿이면 재구매로 본다.
+ */
+function computeRepeatHistory(wines) {
+  var groups = {};
+  wines.forEach(function (w) {
+    if (w['상태'] !== '마심') return;
+    var name = String(w['와인명'] || '').trim();
+    if (!name) return;
+    (groups[name] = groups[name] || []).push(w);
+  });
+  return Object.keys(groups)
+    .map(function (name) { return { name: name, entries: groups[name] }; })
+    .filter(function (g) { return g.entries.length >= 2; })
+    .map(function (g) {
+      g.entries.sort(function (a, b) { return String(a['마신날짜'] || '').localeCompare(String(b['마신날짜'] || '')); });
+      return g;
+    })
+    .sort(function (a, b) { return b.entries.length - a.entries.length; });
+}
+
+/** 재구매 이력을 마신 날짜별 평점 그래프(막대)로 그린다. */
+function repeatHistoryHtml(groups) {
+  if (!groups.length) return '';
+  return '<div class="sect">🔁 두 번 이상 마신 와인</div>' + groups.map(function (g) {
+    var rows = g.entries.map(function (w) {
+      var rating = parseInt(w['평점'], 10) || 0;
+      return '<div class="bar-row"><div class="k">' + esc(w['마신날짜'] || '날짜 미상') + '</div>' +
+        '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:var(--gold);width:' + (rating / 5 * 100) + '%"></div></div>' +
+        '<div class="n stars">' + starsHtml(rating) + '</div></div></div>';
+    }).join('');
+    return '<div class="repeat-group"><div class="repeat-name">' + esc(g.name) +
+      '<span class="repeat-count">' + g.entries.length + '번</span></div>' + rows + '</div>';
+  }).join('');
+}
+
 function renderStats() {
   var area = document.getElementById('statArea');
   var s = computeStats(ALL_WINES);
@@ -988,6 +1038,7 @@ function renderStats() {
     sect('품종별', s.byGrape, false) +
     sect('월별', s.byMonth, false) +
     sect('가격대별', s.byPrice, false) +
+    repeatHistoryHtml(computeRepeatHistory(ALL_WINES)) +
     '<div style="text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--sub)">' +
     '🍷 ' + esc(ME) + ' 셀러</div>';
 }
