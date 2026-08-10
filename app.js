@@ -166,11 +166,14 @@ function bulkFillWineInfo() {
 
 /* ---------- 내 잔 관리 ---------- */
 var MY_GLASSES = [];
+var GLASSES_LOADED = false; // 세션 동안 한 번만 불러온다 — 설정을 열 때마다 서버를 또 부르지 않는다
 
 function loadGlasses() {
+  if (GLASSES_LOADED) { renderGlassChips(); return; }
   document.getElementById('glassChips').innerHTML = '<div class="loading" style="padding:8px 0">불러오는 중…</div>';
   callAPI(function () { return API.getGlasses(); }).then(function (list) {
     MY_GLASSES = (list && !list.error) ? list : [];
+    GLASSES_LOADED = true;
     renderGlassChips();
   });
 }
@@ -194,7 +197,9 @@ function submitAddGlass(e) {
   callAPI(function () { return API.addGlass(name); }).then(function (res) {
     if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
     input.value = '';
-    loadGlasses();
+    // 새로 추가된 한 줄만 아는 상태라 다시 불러올 필요 없이 바로 붙인다.
+    MY_GLASSES.push({ rowIndex: res.rowIndex, '이름': name });
+    renderGlassChips();
   });
 }
 
@@ -203,7 +208,12 @@ function removeGlass(rowIndex) {
   if (!g || !confirm(g['이름'] + ' 잔을 삭제할까요?')) return;
   callAPI(function () { return API.deleteGlass(rowIndex); }).then(function (res) {
     if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
-    loadGlasses();
+    // 시트에서 그 줄이 삭제되면 아래 줄들이 한 칸씩 당겨지니, 로컬 목록도 같이 맞춰준다
+    // (다시 불러오지 않고도 다음 삭제가 엉뚱한 줄을 가리키지 않게).
+    MY_GLASSES = MY_GLASSES
+      .filter(function (x) { return x.rowIndex !== rowIndex; })
+      .map(function (x) { return x.rowIndex > rowIndex ? { rowIndex: x.rowIndex - 1, '이름': x['이름'] } : x; });
+    renderGlassChips();
   });
 }
 
@@ -844,20 +854,21 @@ function addPicked() {
   });
 }
 
-/* ---------- 중복 힌트 ---------- */
-var simTimer = null;
+/**
+ * 중복 힌트. ALL_WINES가 이미 세션에 캐시돼 있어서(load()) 서버를 안 부르고
+ * 그 자리에서 바로 걸러 보여준다 — 타이핑할 때마다 즉시 뜬다.
+ */
 function checkSimilar() {
-  clearTimeout(simTimer);
-  var kw = document.getElementById('f_품종').value || SELECTED_TYPE;
-  simTimer = setTimeout(function () {
-    var box = document.getElementById('similarHint');
-    if (!kw || kw.trim().length < 2) { box.innerHTML = ''; return; }
-    callAPI(function () { return API.getDrunkMatches(kw); }).then(function (ms) {
-      box.innerHTML = (ms && ms.length && !ms.error)
-        ? '<div class="note">💡 비슷한 걸 ' + ms.length + '번 마셔봤어요: ' + ms.map(function (m) { return esc(m['와인명']); }).join(', ') + '</div>'
-        : '';
-    });
-  }, 400);
+  var kw = (document.getElementById('f_품종').value || SELECTED_TYPE).trim();
+  var box = document.getElementById('similarHint');
+  if (kw.length < 2) { box.innerHTML = ''; return; }
+  var ms = ALL_WINES.filter(function (w) {
+    if (w['상태'] !== '마심') return false;
+    return String(w['품종'] || '').indexOf(kw) !== -1 || String(w['종류'] || '').indexOf(kw) !== -1;
+  });
+  box.innerHTML = ms.length
+    ? '<div class="note">💡 비슷한 걸 ' + ms.length + '번 마셔봤어요: ' + ms.map(function (m) { return esc(m['와인명']); }).join(', ') + '</div>'
+    : '';
 }
 
 /* ---------- 추가 / 수정 저장 ---------- */
