@@ -60,6 +60,7 @@
     header .row-right { display:flex; align-items:center; gap:10px; }
     header .count { font-size:13px; color:var(--sub); }
     .settings-btn { border:none; background:transparent; font-size:19px; padding:2px 0 2px 4px; line-height:1; cursor:pointer; }
+    .help-btn { border:1px solid var(--line); background:var(--surface); color:var(--sub); font-size:12px; font-weight:700; padding:6px 11px; border-radius:20px; cursor:pointer; white-space:nowrap; }
 
     /* ---------- 세그먼트 ---------- */
     .seg { display:flex; background:#F0E7DC; border-radius:12px; padding:4px; margin-bottom:14px; }
@@ -199,12 +200,10 @@
     .grip { width:38px; height:4px; border-radius:4px; background:var(--line); margin:0 auto 16px; }
     .modal h3 { margin:0 0 4px; font-size:20px; font-weight:800; letter-spacing:-.4px; line-height:1.3; }
 
-    .help-body { font-size:13.5px; line-height:1.6; color:var(--tx); margin-top:6px; }
-    .help-body p { margin:0 0 14px; color:var(--sub); }
-    .help-body h4 { font-size:14px; font-weight:800; margin:18px 0 6px; }
-    .help-body h4:first-of-type { margin-top:4px; }
-    .help-body ul { margin:0 0 4px; padding-left:18px; }
-    .help-body li { margin-bottom:6px; }
+    .help-body { font-size:14px; line-height:1.6; color:var(--tx); margin-top:8px; }
+    .help-body ol { margin:0; padding-left:20px; }
+    .help-body li { margin-bottom:14px; }
+    .help-body li:last-child { margin-bottom:0; }
     .help-body b { color:var(--wine); }
 
     .admin-summary { font-size:12.5px; font-weight:700; color:var(--sub); margin-bottom:8px; }
