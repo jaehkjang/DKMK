@@ -1107,3 +1107,9 @@ function renderStats() {
 renderTypeChips();
 renderQuickFoods();
 bootstrap();
+
+// 안드로이드 크롬이 홈 화면 아이콘을 manifest.json대로 제대로 그리려면
+// 서비스 워커가 등록돼 있어야 한다(없으면 기본 아이콘으로 대체됨).
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(function () { /* 등록 실패해도 앱 자체는 그대로 동작 */ });
+}
