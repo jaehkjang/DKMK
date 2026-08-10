@@ -122,6 +122,7 @@
     }
     .field textarea { resize:vertical; min-height:52px; }
     .field.big input { font-size:18px; font-weight:700; padding:15px 14px; }
+    .field input[readonly] { background:var(--wine-soft); cursor:default; }
     .duo { display:flex; gap:10px; }
     .duo .field { flex:1; }
 
@@ -214,6 +215,10 @@
     .bar-wrap { flex:1; height:22px; background:#F0E7DC; border-radius:7px; overflow:hidden; }
     .bar { height:100%; background:var(--c,var(--wine)); border-radius:7px; }
     .bar-row .n { flex:0 0 26px; text-align:right; font-size:13.5px; font-weight:800; color:var(--sub); }
+    .bar-row .n.stars { flex-basis:88px; color:var(--gold); letter-spacing:1px; }
+    .repeat-group { margin-bottom:8px; }
+    .repeat-name { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:800; margin:16px 0 2px; }
+    .repeat-count { font-size:11.5px; font-weight:700; color:var(--sub); background:#F0E7DC; padding:2px 9px; border-radius:20px; }
 
     #toast {
     position:fixed; bottom:96px; left:50%; transform:translateX(-50%);
