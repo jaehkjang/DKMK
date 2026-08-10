@@ -900,8 +900,11 @@ function getDrunkMatches(token, keyword) {
  * 거기 없어도 품종/종류로 AI가 순위·이유를 정한다(키워드가 안 겹쳐도 추천 가능).
  * 예전에 마시고 별점을 높게 준 기록이 있으면 그 취향(품종·종류)도 우선순위에 반영한다.
  * 정말 잘 어울리는 와인이 없으면 억지로 채우지 않고 빈 배열을 돌려준다.
- * API 실패 시(food가 있을 때만) 키워드 매칭으로 자동 대체.
- * 반환: [{ wine, reason, matched }] — matched는 셀러 페어링 정보에 직접 근거했는지
+ * food가 있으면 셀러에 있는지와 무관하게 이 음식에 보통 잘 어울리는 지역·품종
+ * 스타일도 함께 알려준다(style) — picks가 비어 있어도(셀러에 마땅한 게 없어도) 항상 준다.
+ * API 실패 시(food가 있을 때만) 키워드 매칭으로 자동 대체하고 style은 빈 문자열로 둔다.
+ * 반환: { picks: [{ wine, reason, 별점, matched }], style }
+ * — matched는 셀러 페어링 정보에 직접 근거했는지
  */
 function recommendByFood(token, food) {
   requireUser_(token);
@@ -909,7 +912,7 @@ function recommendByFood(token, food) {
 
   var all = getWines(token).wines;
   var owned = all.filter(function (w) { return w['상태'] === '보유'; });
-  if (!owned.length) return [];
+  if (!owned.length && !food) return { picks: [], style: '' };
 
   // 예전에 마시고 평점을 높게 준 것들 — 취향 참고용(이 와인 자체는 이미 셀러에 없을 수 있음)
   var liked = all
@@ -950,11 +953,17 @@ function recommendByFood(token, food) {
 
     var askText = food
       ? ('오늘 먹을 음식(여러 개면 가운데 점 · 으로 구분됨): "' + food + '"' + prefText + '\n\n' +
-        '이 음식(들)에 가장 잘 어울리는 와인을 이 목록 안에서만 좋은 순서로 최대 3개 추천해라. ' +
-        '음식이 여러 개면 그 자리에 다 같이 두루 잘 어울리는 와인을 우선하고, 마땅한 게 없으면 음식별로 가장 좋은 조합을 하나씩 골라도 된다. ' +
-        '와인의 "기존페어링" 필드에 이 음식(또는 같은 계열의 음식)이 이미 적혀 있으면 그것을 최우선 근거로 삼고, ' +
-        'reason에 그 문구를 언급해라. 기존페어링에 없어도 품종·종류로 보아 잘 어울리면 추천해도 된다. ' +
-        '한식이면 양념의 맛(맵기·단맛·기름기)까지 고려해라.')
+        (owned.length
+          ? ('이 음식(들)에 가장 잘 어울리는 와인을 이 목록 안에서만 좋은 순서로 최대 3개 추천해라. ' +
+            '음식이 여러 개면 그 자리에 다 같이 두루 잘 어울리는 와인을 우선하고, 마땅한 게 없으면 음식별로 가장 좋은 조합을 하나씩 골라도 된다. ' +
+            '와인의 "기존페어링" 필드에 이 음식(또는 같은 계열의 음식)이 이미 적혀 있으면 그것을 최우선 근거로 삼고, ' +
+            'reason에 그 문구를 언급해라. 기존페어링에 없어도 품종·종류로 보아 잘 어울리면 추천해도 된다. ' +
+            '한식이면 양념의 맛(맵기·단맛·기름기)까지 고려해라.')
+          : '지금 셀러에 등록된 와인이 없으니 "추천"은 빈 배열로 남겨라.') + '\n\n' +
+        '"일반스타일"에는 지금 셀러에 있는지와 무관하게 이 음식(들)에 보통/일반적으로 잘 어울리는 ' +
+        '와인 스타일을 지역·품종 위주로 두 문장 이내 한국어로 설명해라 ' +
+        '(예: "산미 좋은 이탈리아 산지오베제나 스페인 템프라니요처럼 미디엄 바디 레드가 잘 어울려요"). ' +
+        '정말 감이 안 오면 빈 문자열로 남겨라.')
       : ('오늘은 곁들일 음식 없이 와인만 마시고 싶다.' + prefText + '\n\n' +
         '이 목록 안에서 오늘 그냥 마시기 좋은 와인을 좋은 순서로 최대 3개 추천해라. ' +
         '와인 자체의 스타일·마시기 편한 정도(가벼움/묵직함)·평소 취향을 근거로 골라라.');
@@ -963,13 +972,16 @@ function recommendByFood(token, food) {
       '각 와인의 "기존페어링" 필드에는 우리가 이미 적어둔 어울리는 음식 정보가 있다.\n' +
       JSON.stringify(menu) + '\n\n' + askText + '\n\n' +
       '정말 잘 어울리거나 마실 만하다고 자신 있게 말할 수 있는 와인만 골라라. ' +
-      '억지로 3개를 채우지 말고, 그런 와인이 하나도 없으면 빈 배열을 반환해라. ' +
+      '억지로 3개를 채우지 말고, 그런 와인이 하나도 없으면 "추천"은 빈 배열로 반환해라. ' +
       '각 추천에는 5점 만점 별점을 매겨라 — 정말 완벽하게 어울릴 때만 5점을 주고, 자신 없으면 4점 이하로 줘라. ' +
-      '아래 JSON 배열로만 답하라.\n' +
-      '[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}]';
+      '아래 JSON으로만 답하라.\n' +
+      (food
+        ? '{"추천":[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}], "일반스타일":"..."}'
+        : '{"추천":[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}]}');
 
-    var picks = callGemini_([{ text: prompt }]);
-    var list = Array.isArray(picks) ? picks : (picks.recommendations || picks.list || []);
+    var result = callGemini_([{ text: prompt }]);
+    var list = Array.isArray(result) ? result : (result['추천'] || result.recommendations || result.list || []);
+    var style = (result && result['일반스타일']) || '';
 
     var out = [];
     list.forEach(function (p) {
@@ -985,16 +997,19 @@ function recommendByFood(token, food) {
         }
       }
     });
-    return out;
+    return { picks: out, style: style };
   } catch (e) {
     // AI 실패 시(음식이 있을 때만) 아래 키워드 매칭으로 넘어감
-    if (!food) return [];
+    if (!food) return { picks: [], style: '' };
   }
 
-  return recommendByKeyword_(food, owned, liked).map(function (x) {
-    x.matched = !!directIds[x.wine.rowIndex];
-    return x;
-  });
+  return {
+    picks: recommendByKeyword_(food, owned, liked).map(function (x) {
+      x.matched = !!directIds[x.wine.rowIndex];
+      return x;
+    }),
+    style: ''
+  };
 }
 
 /**
