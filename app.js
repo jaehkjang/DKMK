@@ -906,22 +906,26 @@ function doRecommendNoFood() {
 function runRecommend(food) {
   var area = document.getElementById('foodArea');
   area.innerHTML = '<div class="loading">🍷 고르는 중…</div>';
-  callAPI(function () { return API.recommendByFood(food); }).then(function (list) {
-    if (!list || list.error) {
-      area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(list && list.error) + '</div>';
+  callAPI(function () { return API.recommendByFood(food); }).then(function (res) {
+    if (!res || res.error) {
+      area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(res && res.error) + '</div>';
       return;
     }
-    if (!list.length) {
-      area.innerHTML = '<div class="empty"><span class="big">🤔</span>지금 셀러에서<br>딱 맞는 걸 찾지 못했어요</div>';
-      return;
-    }
-    area.innerHTML = list.map(function (x) {
-      var w = x.wine || x;
-      var badge = x.matched ? '<div class="match-badge">🍷 이 와인 페어링 정보에 있어요</div>' : '';
-      var stars = x['별점'] ? '<span class="stars">' + starsHtml(x['별점']) + '</span> ' : '';
-      var reason = (stars || x.reason) ? '<div class="reason">' + stars + esc(x.reason || '') + '</div>' : '';
-      return cardHtml(w, badge + reason);
-    }).join('');
+    var picks = res.picks || [];
+    // 일반스타일은 셀러에 잘 맞는 와인이 있든 없든 항상 보여준다 — 내 와인과 별개로 참고할 정보라서.
+    var styleHtml = res.style
+      ? '<div class="style-guide"><div class="style-guide-t">🍇 보통 이런 스타일이 잘 어울려요</div>' + esc(res.style) + '</div>'
+      : '';
+    var picksHtml = picks.length
+      ? picks.map(function (x) {
+        var w = x.wine || x;
+        var badge = x.matched ? '<div class="match-badge">🍷 이 와인 페어링 정보에 있어요</div>' : '';
+        var stars = x['별점'] ? '<span class="stars">' + starsHtml(x['별점']) + '</span> ' : '';
+        var reason = (stars || x.reason) ? '<div class="reason">' + stars + esc(x.reason || '') + '</div>' : '';
+        return cardHtml(w, badge + reason);
+      }).join('')
+      : '<div class="empty"><span class="big">🤔</span>지금 셀러에서<br>딱 맞는 걸 찾지 못했어요</div>';
+    area.innerHTML = styleHtml + picksHtml;
   });
 }
 

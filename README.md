@@ -105,7 +105,7 @@ node overflow_check.js # 좁은 화면 가로 넘침 검증
 | `unmarkDrunk` (token, row) | 되돌리기 |
 | `recognizeLabel` (token, photo) | 라벨 1병 인식 |
 | `recognizeCellar` (token, photo) | 셀러 사진에서 여러 병 인식 + 중복 표시 |
-| `recommendByFood` (token, food) | 음식 → 보유 와인 추천. 셀러 페어링 정보와 직접 일치하면 matched:true (AI, 실패 시 키워드) |
+| `recommendByFood` (token, food) | 음식 → { picks: 보유 와인 추천(셀러 페어링 정보와 직접 일치하면 matched:true, AI 실패 시 키워드로 대체), style: 셀러와 무관한 일반적인 페어링 스타일 설명 } |
 | `getStats` (token) | 소비 통계 |
 
 Apps Script 편집기에서 직접 실행하는 관리용 함수도 있습니다: `setup()`(설정 재실행), `checkSetup()`(속성·시트·컬럼 상태 점검).
