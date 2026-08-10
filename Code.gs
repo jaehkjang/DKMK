@@ -84,6 +84,7 @@ function dispatch_(action, p) {
     case 'recognizeCellar':  return recognizeCellar(token, p.photo);
     case 'recommendByFood':  return recommendByFood(token, p.food);
     case 'getStats':         return getStats(token);
+    case 'getAdminOverview': return getAdminOverview(token);
     case 'getGlasses':       return getGlasses(token);
     case 'addGlass':         return addGlass(token, p.name);
     case 'deleteGlass':      return deleteGlass(token, p.row);
@@ -220,6 +221,7 @@ var USER_COLUMNS = ['아이디', '이름', '비번해시', '솔트', '가입일'
 var OWNER_COLUMN = '소유자';
 var HASH_ROUNDS = 1000;
 var TOKEN_DAYS = 365;
+var ADMIN_ID = 'dkmk'; // 이 아이디로 로그인하면 설정에서 전체 사용자 현황을 볼 수 있다
 
 /** 사용자 시트 (없으면 만든다) */
 function userSheet_() {
@@ -350,7 +352,7 @@ function enter(name, pw) {
       return { error: '비밀번호가 맞지 않아요' };
     }
     userSheet_().getRange(existing.rowIndex, USER_COLUMNS.indexOf('마지막로그인') + 1).setValue(todayStr_());
-    return { ok: true, token: makeToken_(key), name: String(existing['이름']), created: false };
+    return { ok: true, token: makeToken_(key), name: String(existing['이름']), created: false, id: key, isAdmin: key === ADMIN_ID };
   }
 
   var lock = LockService.getScriptLock();
@@ -364,7 +366,7 @@ function enter(name, pw) {
     var again = findUser_(key);
     if (again) {
       if (hashPw_(pw, again['솔트']) !== again['비번해시']) return { error: '비밀번호가 맞지 않아요' };
-      return { ok: true, token: makeToken_(key), name: String(again['이름']), created: false };
+      return { ok: true, token: makeToken_(key), name: String(again['이름']), created: false, id: key, isAdmin: key === ADMIN_ID };
     }
 
     var isFirst = userRows_().length === 0;
@@ -374,7 +376,7 @@ function enter(name, pw) {
     // 첫 셀러라면 소유자가 비어 있던 기존 와인을 넘겨받는다
     var moved = isFirst ? claimOrphanWines_(key) : 0;
 
-    return { ok: true, token: makeToken_(key), name: display, created: true, moved: moved };
+    return { ok: true, token: makeToken_(key), name: display, created: true, moved: moved, id: key, isAdmin: key === ADMIN_ID };
   } finally {
     lock.releaseLock();
   }
@@ -418,10 +420,73 @@ function changePassword(token, newPw) {
 function checkToken(token) {
   try {
     var user = requireUser_(token);
-    return { ok: true, name: String(user['이름']), id: String(user['아이디']) };
+    var id = String(user['아이디']);
+    return { ok: true, name: String(user['이름']), id: id, isAdmin: id === ADMIN_ID };
   } catch (err) {
     return { ok: false };
   }
+}
+
+function fmtDateMaybe_(v) {
+  if (!v) return '';
+  if (v instanceof Date) {
+    var tz = Session.getScriptTimeZone() || 'Asia/Seoul';
+    return Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+  }
+  return String(v);
+}
+
+/**
+ * 관리자(ADMIN_ID)만 볼 수 있는 전체 사용자 현황. 셀러(사용자)별로 보유/마신
+ * 와인 수와 마지막 활동일을 모아 보여준다. 와인 시트를 한 번만 훑어서
+ * 소유자별로 집계하고(사용자마다 따로 조회하지 않음), 가입일 최신순이 아니라
+ * 최근에 로그인한 순으로 정렬해서 활발한 셀러가 위로 오게 한다.
+ */
+function getAdminOverview(token) {
+  var me = requireUser_(token);
+  if (String(me['아이디']) !== ADMIN_ID) throw new Error('관리자만 볼 수 있어요');
+
+  var sheet = getSheet_();
+  var headers = getHeaders_();
+  var lastRow = sheet.getLastRow();
+  var ownerIdx = headers.indexOf(OWNER_COLUMN);
+  var statusIdx = headers.indexOf('상태');
+  var drunkDateIdx = headers.indexOf('마신날짜');
+  var addedIdx = headers.indexOf('등록일');
+
+  var byOwner = {};
+  if (lastRow >= 2) {
+    var values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+    values.forEach(function (row) {
+      var owner = ownerIdx !== -1 ? String(row[ownerIdx]).trim() : '';
+      if (!owner) return;
+      if (!byOwner[owner]) byOwner[owner] = { 보유: 0, 마심: 0, 마지막활동: '' };
+      var stat = byOwner[owner];
+      if (statusIdx !== -1 && row[statusIdx] === '마심') stat.마심++; else stat.보유++;
+      var act = fmtDateMaybe_((drunkDateIdx !== -1 && row[drunkDateIdx]) || (addedIdx !== -1 && row[addedIdx]));
+      if (act > stat.마지막활동) stat.마지막활동 = act;
+    });
+  }
+
+  var users = userRows_().map(function (u) {
+    var id = String(u['아이디']);
+    var stat = byOwner[id] || { 보유: 0, 마심: 0, 마지막활동: '' };
+    return {
+      아이디: id,
+      이름: String(u['이름']),
+      가입일: fmtDateMaybe_(u['가입일']),
+      마지막로그인: fmtDateMaybe_(u['마지막로그인']),
+      보유: stat.보유,
+      마심: stat.마심,
+      마지막활동: stat.마지막활동
+    };
+  }).sort(function (a, b) { return String(b.마지막로그인).localeCompare(String(a.마지막로그인)); });
+
+  return {
+    totalUsers: users.length,
+    totalWines: lastRow >= 2 ? lastRow - 1 : 0,
+    users: users
+  };
 }
 
 /* ===================== 와인 목록 ===================== */

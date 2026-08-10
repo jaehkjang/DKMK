@@ -42,6 +42,7 @@
       <h1 id="pgTitle">셀러</h1>
       <div class="row-right">
         <span class="count" id="pgCount"></span>
+        <button type="button" class="settings-btn" onclick="openHelp()" aria-label="도움말">❔</button>
         <button type="button" class="settings-btn" onclick="openSettings()" aria-label="설정">⚙️</button>
       </div>
     </div>
@@ -152,6 +153,11 @@
         <button class="act" onclick="shareApp()"><span class="ic">🔗</span>홈 화면에 추가 / 공유</button>
       </div>
 
+      <div id="adminSection" style="display:none">
+        <h3 style="margin-top:22px;font-size:15px">👑 관리자 · 전체 사용자 현황</h3>
+        <div id="adminOverview"></div>
+      </div>
+
       <h3 style="margin-top:22px;font-size:15px">비밀번호 변경</h3>
       <form onsubmit="submitChangePw(event)">
         <div class="field"><input id="pwNew" type="password" placeholder="새 비밀번호 4자리" autocomplete="new-password"
@@ -177,6 +183,57 @@
       <div id="bulkFillStatus" style="font-size:12.5px;color:var(--sub);margin-top:8px"></div>
 
       <button class="more-toggle" onclick="cm('settingsModal')">닫기</button>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="helpModal" onclick="if(event.target===this) cm('helpModal')">
+    <div class="modal">
+      <div class="grip"></div>
+      <h3>🍷 와인 딸까 말까가 하는 일</h3>
+      <div class="help-body">
+        <p>우리 집 와인 셀러를 관리하는 앱이에요. 아래 기능들을 둘러보세요.</p>
+
+        <h4>📸 와인 추가</h4>
+        <ul>
+          <li><b>라벨 찍기</b> — 사진 한 장이면 와인 이름·품종·생산지·종류를 AI가 알아서 읽어줘요. 카메라 대신 사진 라이브러리에서 골라도 돼요.</li>
+          <li><b>셀러 찍기</b> — 여러 병을 한 번에 찍으면 각각 인식해서 원하는 것만 골라 담을 수 있어요.</li>
+        </ul>
+
+        <h4>🍇 와인 상세 정보 (자동 완성)</h4>
+        <ul>
+          <li>서빙 온도 · 에어링(디캔팅) 시간</li>
+          <li>잔 추천 두 가지 — 완벽한 잔(이상적인 잔) / 내 잔 추천(내가 등록해둔 잔 중 가장 잘 맞는 것), 별점으로 적합도 표시</li>
+          <li>추천 음식 두 가지 — 클래식 페어링(구하기 쉬운지 무관, 이상적인 조합) / 제안 페어링(한국에서 구하기 쉬운 음식), 별점으로 적합도 표시</li>
+          <li>와인 배경(스타일·유명한 이유 등), 국내 가격대(추정)</li>
+          <li>빈티지는 AI가 절대 추측하지 않아요 — 라벨 사진에 실제로 보일 때만 채워요</li>
+          <li>설정 → "보유 와인 정보 한번에 채우기"로 기존 와인들도 한 번에 채울 수 있어요</li>
+        </ul>
+
+        <h4>🍽️ 페어링 추천</h4>
+        <ul>
+          <li>음식을 골라 "어울리는 와인 찾기" — 내 셀러에서 잘 맞는 와인을 별점·이유와 함께 추천하고, 셀러에 없어도 이 음식에 보통 잘 어울리는 스타일(지역·품종)도 알려줘요</li>
+          <li>"안주없이 마실 와인 추천받기" — 오늘 그냥 마시기 좋은 와인 추천</li>
+          <li>정말 잘 어울리는 게 없으면 억지로 추천하지 않아요</li>
+        </ul>
+
+        <h4>🥂 마시기 기록</h4>
+        <ul>
+          <li>별점, 한줄평, 함께한 음식, 재구매 의향(쟁여두고 싶다 / 가격 좋으면 산다 / 한 번이면 족하다)을 남길 수 있어요</li>
+          <li>같은 와인을 두 번 이상 마시면 기록 탭에서 마실 때마다의 평점 변화를 볼 수 있어요</li>
+        </ul>
+
+        <h4>📊 기록(통계)</h4>
+        <ul>
+          <li>지금까지 마신 와인 수, 종류별·품종별·월별·가격대별 통계를 그래프로 보여줘요</li>
+        </ul>
+
+        <h4>⚙️ 설정</h4>
+        <ul>
+          <li>비밀번호 변경, 내가 가진 잔 등록/관리</li>
+          <li>홈 화면에 추가 / 공유 — 앱처럼 바로 쓸 수 있게 설치하는 방법 안내</li>
+        </ul>
+      </div>
+      <button class="more-toggle" onclick="cm('helpModal')">닫기</button>
     </div>
   </div>
 
