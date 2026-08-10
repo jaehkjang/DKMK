@@ -199,6 +199,21 @@
     .grip { width:38px; height:4px; border-radius:4px; background:var(--line); margin:0 auto 16px; }
     .modal h3 { margin:0 0 4px; font-size:20px; font-weight:800; letter-spacing:-.4px; line-height:1.3; }
 
+    .help-body { font-size:13.5px; line-height:1.6; color:var(--tx); margin-top:6px; }
+    .help-body p { margin:0 0 14px; color:var(--sub); }
+    .help-body h4 { font-size:14px; font-weight:800; margin:18px 0 6px; }
+    .help-body h4:first-of-type { margin-top:4px; }
+    .help-body ul { margin:0 0 4px; padding-left:18px; }
+    .help-body li { margin-bottom:6px; }
+    .help-body b { color:var(--wine); }
+
+    .admin-summary { font-size:12.5px; font-weight:700; color:var(--sub); margin-bottom:8px; }
+    .admin-row { padding:9px 0; border-bottom:1px solid var(--line); }
+    .admin-row:last-child { border-bottom:none; }
+    .admin-row-top { display:flex; align-items:baseline; gap:7px; font-size:14px; }
+    .admin-id { font-size:12px; color:var(--sub); font-weight:600; }
+    .admin-row-stats { font-size:12px; color:var(--sub); margin-top:3px; line-height:1.5; }
+
     .facts { margin-top:16px; }
     .fact { padding:12px 0; border-bottom:1px solid var(--line); }
     .fact:last-child { border-bottom:none; }

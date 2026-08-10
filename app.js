@@ -6,7 +6,7 @@
 
 var ALL_WINES = [], SEG = '보유', PENDING_ROW = null, CURRENT_RATING = 5;
 var PHOTO_DATAURL = null, PHOTO_UPLOADED_URL = null, PICKS = [], PICK_ON = {}, SELECTED_TYPE = '';
-var TOKEN = '', ME = '', EDIT_ROW = null, DETAIL_ROW = null;
+var TOKEN = '', ME = '', EDIT_ROW = null, DETAIL_ROW = null, IS_ADMIN = false;
 var WINES_LOADED = false; // 탭을 오갈 때마다 매번 서버에 다시 안 물어보려고 세션 동안 캐시
 
 var TYPES = [
@@ -99,7 +99,7 @@ function submitAuth(ev) {
     btn.disabled = false; btn.textContent = '시작하기';
     if (!res || res.error) { err.textContent = (res && res.error) || '문제가 생겼어요'; return; }
     API.setToken(res.token);
-    TOKEN = res.token; ME = res.name;
+    TOKEN = res.token; ME = res.name; IS_ADMIN = !!res.isAdmin;
     document.getElementById('pinScreen').style.display = 'none';
     if (res.moved) toast('기존 와인 ' + res.moved + '병을 가져왔어요');
     else if (res.created) toast(res.name + ' 셀러를 만들었어요 🍾');
@@ -113,7 +113,31 @@ function openSettings() {
   document.getElementById('pwErr').textContent = '';
   if (!BULK_FILL_RUNNING) document.getElementById('bulkFillStatus').textContent = '';
   loadGlasses();
+  document.getElementById('adminSection').style.display = IS_ADMIN ? '' : 'none';
+  if (IS_ADMIN) loadAdminOverview();
   om('settingsModal');
+}
+
+function openHelp() {
+  om('helpModal');
+}
+
+/** 관리자(dkmk)만 볼 수 있는 전체 사용자 현황 — 매번 최신으로 보여줘야 해서 캐시하지 않는다. */
+function loadAdminOverview() {
+  var el = document.getElementById('adminOverview');
+  el.innerHTML = '<div class="loading" style="padding:8px 0">불러오는 중…</div>';
+  callAPI(function () { return API.getAdminOverview(); }).then(function (data) {
+    if (!data || data.error) { el.innerHTML = '<div class="note">' + esc((data && data.error) || '불러오지 못했어요') + '</div>'; return; }
+    if (!data.users.length) { el.innerHTML = '<div class="note">아직 가입한 사용자가 없어요</div>'; return; }
+    el.innerHTML = '<div class="admin-summary">총 ' + data.totalUsers + '명 · 등록된 와인 ' + data.totalWines + '병</div>' +
+      data.users.map(function (u) {
+        return '<div class="admin-row">' +
+          '<div class="admin-row-top"><b>' + esc(u.이름) + '</b><span class="admin-id">@' + esc(u.아이디) + '</span></div>' +
+          '<div class="admin-row-stats">보유 ' + u.보유 + '병 · 마심 ' + u.마심 + '병 · 가입 ' + esc(u.가입일) +
+          ' · 최근 로그인 ' + esc(u.마지막로그인) + (u.마지막활동 ? ' · 최근 활동 ' + esc(u.마지막활동) : '') + '</div>' +
+          '</div>';
+      }).join('');
+  });
 }
 
 /**
@@ -262,9 +286,12 @@ function shareApp() {
     '1. 이 링크를 크롬으로 열기\n' +
     '2. 우측 상단 점 세 개(⋮) 메뉴 탭\n' +
     '3. "홈 화면에 추가" 또는 "앱 설치" 선택 → 추가';
+  // url을 별도 필드로만 넘기면 카카오톡 등 일부 공유 대상이 그 값을 무시하고
+  // text만 보여줘서 정작 링크가 안 보이는 경우가 있다 — text 안에도 링크를 직접 넣어
+  // 어떤 공유 대상이든 항상 링크가 보이게 한다.
   var data = {
     title: '와인 딸까 말까',
-    text: intro + '\n\n' + howto,
+    text: intro + '\n\n' + howto + '\n\n👉 ' + url,
     url: url
   };
   if (navigator.share) {
@@ -304,7 +331,7 @@ function bootstrap() {
   if (!TOKEN) { showAuthForm(); return; }
   callAPI(function () { return API.checkToken(); }).then(function (res) {
     if (res && res.ok) {
-      ME = res.name;
+      ME = res.name; IS_ADMIN = !!res.isAdmin;
       document.getElementById('pinScreen').style.display = 'none';
       load();
     } else {
