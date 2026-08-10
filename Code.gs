@@ -72,7 +72,7 @@ function dispatch_(action, p) {
   switch (action) {
     case 'enter':            return enter(p.name, p.pw);
     case 'checkToken':       return checkToken(token);
-    case 'changePassword':   return changePassword(token, p.oldPw, p.newPw);
+    case 'changePassword':   return changePassword(token, p.newPw);
     case 'getWines':         return getWines(token);
     case 'addWine':          return addWine(token, p.data, p.photo);
     case 'addWines':         return addWines(token, p.list);
@@ -401,15 +401,11 @@ function claimOrphanWines_(id) {
   return count;
 }
 
-/** 비밀번호 변경. 현재 비번을 확인한 뒤 새 4자리 숫자로 교체한다(솔트도 새로 만듦). */
-function changePassword(token, oldPw, newPw) {
+/** 비밀번호 변경. 로그인된 토큰(=이미 본인 확인됨) 상태면 새 4자리 숫자로 바로 교체한다(솔트도 새로 만듦). */
+function changePassword(token, newPw) {
   var user = requireUser_(token);
-  oldPw = String(oldPw || '');
   newPw = String(newPw || '');
 
-  if (hashPw_(oldPw, user['솔트']) !== user['비번해시']) {
-    return { error: '현재 비밀번호가 맞지 않아요' };
-  }
   if (!/^\d{4}$/.test(newPw)) return { error: '새 비밀번호는 4자리 숫자로 입력해주세요' };
 
   var salt = randomHex_(16);

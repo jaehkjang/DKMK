@@ -154,8 +154,6 @@
 
       <h3 style="margin-top:22px;font-size:15px">비밀번호 변경</h3>
       <form onsubmit="submitChangePw(event)">
-        <div class="field"><input id="pwOld" type="password" placeholder="현재 비밀번호 4자리" autocomplete="current-password"
-          inputmode="numeric" pattern="[0-9]*" maxlength="4" oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)"></div>
         <div class="field"><input id="pwNew" type="password" placeholder="새 비밀번호 4자리" autocomplete="new-password"
           inputmode="numeric" pattern="[0-9]*" maxlength="4" oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)"></div>
         <div class="field"><input id="pwNew2" type="password" placeholder="새 비밀번호 확인" autocomplete="new-password"
