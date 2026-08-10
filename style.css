@@ -194,10 +194,10 @@
     .modal h3 { margin:0 0 4px; font-size:20px; font-weight:800; letter-spacing:-.4px; line-height:1.3; }
 
     .facts { margin-top:16px; }
-    .fact { display:flex; gap:11px; padding:12px 0; border-bottom:1px solid var(--line); align-items:flex-start; }
+    .fact { padding:12px 0; border-bottom:1px solid var(--line); }
     .fact:last-child { border-bottom:none; }
-    .fact .k { flex:0 0 78px; color:var(--sub); font-size:13.5px; }
-    .fact .v { flex:1; font-size:14.5px; line-height:1.5; }
+    .fact .k { display:block; white-space:nowrap; color:var(--sub); font-size:13px; font-weight:700; margin-bottom:4px; }
+    .fact .v { font-size:14.5px; line-height:1.5; }
 
     .star-pick { display:flex; gap:10px; justify-content:center; font-size:38px; margin:6px 0 20px; }
     .star-pick span { color:var(--line); }
