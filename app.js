@@ -382,9 +382,14 @@ function cardHtml(w, extraHtml) {
       '<button class="undo-btn" onclick="event.stopPropagation();doUnmark(' + w.rowIndex + ')">되돌리기</button>'
     : '<span></span><button class="drink-btn" onclick="event.stopPropagation();openDrinkModal(' + w.rowIndex + ')">마시기</button>';
 
+  var thumb = w['라벨사진'] ? '<img class="card-thumb" src="' + esc(w['라벨사진']) + '" alt="">' : '';
+
   return '<div class="card' + (isDrunk ? ' dim' : '') + '" style="--c:' + t.c + ';--c-soft:' + t.s + '" onclick="openDetail(' + w.rowIndex + ')">' +
+    '<div class="card-head">' + thumb +
+    '<div class="card-head-text">' +
     '<div class="name">' + esc(w['와인명']) + '</div>' +
     '<div class="line"><span class="tag">' + esc(t.n) + '</span>' + grape + sub + '</div>' +
+    '</div></div>' +
     (extraHtml || '') +
     '<div class="foot">' + foot + '</div>' +
     '</div>';
