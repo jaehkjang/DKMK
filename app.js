@@ -465,8 +465,8 @@ function detailFactsHtml(w) {
 
 /**
  * 서빙 온도 · 에어링(디캔팅) 시간 · 잔 추천 두 가지(완벽한 잔 / 내 잔 추천) ·
- * 추천 페어링을 각각 따로 보여준다. 잔 두 종류와 추천 페어링에는 5점 만점
- * 별점이 함께 붙는다(완벽할 때만 5개).
+ * 페어링 음식 두 가지(클래식 페어링 / 제안 페어링)를 각각 따로 보여준다.
+ * 잔 두 종류와 페어링 두 종류에는 5점 만점 별점이 함께 붙는다(완벽할 때만 5개).
  */
 function servingFactsHtml(w) {
   var rows = [];
@@ -474,8 +474,8 @@ function servingFactsHtml(w) {
   if (w['에어링시간']) rows.push(['⏱ 에어링 시간', w['에어링시간']]);
   if (w['완벽한잔']) rows.push(['🥂 완벽한 잔', w['완벽한잔'] + ' ' + starsHtml(w['완벽한잔별점'])]);
   if (w['내잔추천']) rows.push(['🍷 내 잔 추천', w['내잔추천'] + ' ' + starsHtml(w['내잔추천별점'])]);
-  if (w['베스트페어링']) rows.push(['🍽 베스트 페어링', w['베스트페어링'] + (w['베스트페어링별점'] ? ' ' + starsHtml(w['베스트페어링별점']) : '')]);
-  if (w['추천 페어링']) rows.push(['🇰🇷 한국 추천 음식', w['추천 페어링'] + (w['추천페어링별점'] ? ' ' + starsHtml(w['추천페어링별점']) : '')]);
+  if (w['베스트페어링']) rows.push(['🍽 클래식 페어링 음식', w['베스트페어링'] + (w['베스트페어링별점'] ? ' ' + starsHtml(w['베스트페어링별점']) : '')]);
+  if (w['추천 페어링']) rows.push(['🍽 제안 페어링 음식', w['추천 페어링'] + (w['추천페어링별점'] ? ' ' + starsHtml(w['추천페어링별점']) : '')]);
   if (!rows.length) return '';
   return '<div class="facts" style="margin-top:0">' + rows.map(function (f) {
     return '<div class="fact"><div class="k">' + f[0] + '</div><div class="v">' + esc(f[1]) + '</div></div>';
