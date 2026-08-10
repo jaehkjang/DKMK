@@ -82,7 +82,6 @@ function dispatch_(action, p) {
     case 'unmarkDrunk':      return unmarkDrunk(token, p.row);
     case 'recognizeLabel':   return recognizeLabel(token, p.photo);
     case 'recognizeCellar':  return recognizeCellar(token, p.photo);
-    case 'getDrunkMatches':  return getDrunkMatches(token, p.keyword);
     case 'recommendByFood':  return recommendByFood(token, p.food);
     case 'getStats':         return getStats(token);
     case 'getGlasses':       return getGlasses(token);
@@ -554,15 +553,16 @@ function getGlasses(token) {
   return out;
 }
 
-/** 잔 추가 (같은 이름 중복 등록 방지) */
+/** 잔 추가 (같은 이름 중복 등록 방지). rowIndex를 돌려줘서 클라이언트가 다시 목록을 안 불러오고 바로 추가할 수 있게 한다. */
 function addGlass(token, name) {
   var me = String(requireUser_(token)['아이디']);
   name = String(name || '').trim();
   if (!name) return { error: '잔 이름을 적어주세요' };
   var existing = getGlasses(token);
   if (existing.some(function (g) { return g['이름'] === name; })) return { error: '이미 등록된 잔이에요' };
-  glassSheet_().appendRow([name, me]);
-  return { ok: true };
+  var sheet = glassSheet_();
+  sheet.appendRow([name, me]);
+  return { ok: true, rowIndex: sheet.getLastRow() };
 }
 
 /** 잔 삭제 */
@@ -876,20 +876,63 @@ function unmarkDrunk(token, rowIndex) {
   return { ok: true };
 }
 
-/**
- * 품종/종류 키워드로 "이미 마신" 와인 조회 (추가할 때 비교용)
+/* ===================== 페어링 추천 캐시 =====================
+ * 같은 음식(조합)을 다시 검색하면 AI를 또 부르지 않고 저장된 결과를 바로 돌려준다 —
+ * 속도가 이 앱의 핵심 가치라, 한 번 물어본 건 최대한 다시 안 물어본다.
+ * 다만 계속 옛날 정보만 보여주면 안 되니 3개월이 지나면 캐시를 버리고 새로 찾는다.
+ * picks는 특정 와인(rowIndex)만 캐시해두고, 실제 와인 정보는 매번 최신 셀러에서
+ * 다시 찾아 붙인다 — 그 사이 마셨거나 수정된 와인이 있어도 항상 최신 상태로 보인다.
  */
-function getDrunkMatches(token, keyword) {
-  if (!keyword) return [];
-  keyword = String(keyword).trim();
-  if (!keyword) return [];
-  var data = getWines(token);
-  return data.wines.filter(function (w) {
-    if (w['상태'] !== '마심') return false;
-    var 품종 = String(w['품종'] || '');
-    var 종류 = String(w['종류'] || '');
-    return 품종.indexOf(keyword) !== -1 || 종류.indexOf(keyword) !== -1;
-  });
+var PAIRING_CACHE_SHEET = '페어링캐시';
+var PAIRING_CACHE_COLUMNS = ['쿼리키', '결과JSON', '저장일시', '소유자'];
+var PAIRING_CACHE_MONTHS = 3;
+
+function pairingCacheSheet_() {
+  var ss = getSS_();
+  var sh = ss.getSheetByName(PAIRING_CACHE_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(PAIRING_CACHE_SHEET);
+    sh.getRange(1, 1, 1, PAIRING_CACHE_COLUMNS.length).setValues([PAIRING_CACHE_COLUMNS]);
+    sh.hideSheet();
+  }
+  return sh;
+}
+
+/** 음식 고르는 순서가 달라도(예: "삼겹살·치즈" vs "치즈·삼겹살") 같은 조합이면 같은 캐시를 쓰게 정렬해서 키를 만든다. */
+function pairingCacheKey_(food) {
+  return food.split(/[·,]+/).map(function (s) { return s.trim(); }).filter(Boolean).sort().join('·');
+}
+
+function getPairingCache_(me, key) {
+  var sheet = pairingCacheSheet_();
+  var last = sheet.getLastRow();
+  if (last < 2) return null;
+  var values = sheet.getRange(2, 1, last - 1, PAIRING_CACHE_COLUMNS.length).getValues();
+  var cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - PAIRING_CACHE_MONTHS);
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][3]).trim() !== me || values[i][0] !== key) continue;
+    if (new Date(values[i][2]) < cutoff) return null; // 오래됐으니 새로 검색
+    try { return JSON.parse(values[i][1]); } catch (e) { return null; }
+  }
+  return null;
+}
+
+/** 같은 사용자·같은 키의 캐시가 이미 있으면 덮어쓰고, 없으면 새 줄을 만든다. */
+function setPairingCache_(me, key, data) {
+  var sheet = pairingCacheSheet_();
+  var last = sheet.getLastRow();
+  var row = [key, JSON.stringify(data), new Date(), me];
+  if (last >= 2) {
+    var values = sheet.getRange(2, 1, last - 1, PAIRING_CACHE_COLUMNS.length).getValues();
+    for (var i = 0; i < values.length; i++) {
+      if (String(values[i][3]).trim() === me && values[i][0] === key) {
+        sheet.getRange(i + 2, 1, 1, PAIRING_CACHE_COLUMNS.length).setValues([row]);
+        return;
+      }
+    }
+  }
+  sheet.appendRow(row);
 }
 
 /**
@@ -902,17 +945,32 @@ function getDrunkMatches(token, keyword) {
  * 정말 잘 어울리는 와인이 없으면 억지로 채우지 않고 빈 배열을 돌려준다.
  * food가 있으면 셀러에 있는지와 무관하게 이 음식에 보통 잘 어울리는 지역·품종
  * 스타일도 함께 알려준다(style) — picks가 비어 있어도(셀러에 마땅한 게 없어도) 항상 준다.
+ * food가 있을 때는 먼저 캐시(3개월)를 확인해서 있으면 AI 호출 없이 바로 돌려준다.
  * API 실패 시(food가 있을 때만) 키워드 매칭으로 자동 대체하고 style은 빈 문자열로 둔다.
  * 반환: { picks: [{ wine, reason, 별점, matched }], style }
  * — matched는 셀러 페어링 정보에 직접 근거했는지
  */
 function recommendByFood(token, food) {
-  requireUser_(token);
+  var me = String(requireUser_(token)['아이디']);
   food = String(food || '').trim();
 
   var all = getWines(token).wines;
   var owned = all.filter(function (w) { return w['상태'] === '보유'; });
   if (!owned.length && !food) return { picks: [], style: '' };
+
+  var cacheKey = food ? pairingCacheKey_(food) : '';
+  if (cacheKey) {
+    var cached = getPairingCache_(me, cacheKey);
+    if (cached) {
+      var ownedById = {};
+      owned.forEach(function (w) { ownedById[w.rowIndex] = w; });
+      // 캐시엔 와인 id만 있고, 실제 와인 정보는 항상 지금 셀러에서 새로 찾아 붙인다.
+      var picks = (cached.picks || [])
+        .filter(function (p) { return ownedById[p.id]; })
+        .map(function (p) { return { wine: ownedById[p.id], reason: p.reason, '별점': p['별점'], matched: p.matched }; });
+      return { picks: picks, style: cached.style || '' };
+    }
+  }
 
   // 예전에 마시고 평점을 높게 준 것들 — 취향 참고용(이 와인 자체는 이미 셀러에 없을 수 있음)
   var liked = all
@@ -997,6 +1055,13 @@ function recommendByFood(token, food) {
         }
       }
     });
+
+    if (cacheKey) {
+      var cachePicks = out.map(function (p) {
+        return { id: p.wine.rowIndex, reason: p.reason, '별점': p['별점'], matched: p.matched };
+      });
+      setPairingCache_(me, cacheKey, { picks: cachePicks, style: style });
+    }
     return { picks: out, style: style };
   } catch (e) {
     // AI 실패 시(음식이 있을 때만) 아래 키워드 매칭으로 넘어감

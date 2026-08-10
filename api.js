@@ -63,7 +63,6 @@ const API = {
   recognizeCellar(photo)   { return this._post('recognizeCellar', { photo }); },
 
   // ── 추천 / 통계 ──
-  getDrunkMatches(keyword) { return this._get('getDrunkMatches', { keyword }); },
   recommendByFood(food)    { return this._get('recommendByFood', { food }); },
   getStats()               { return this._get('getStats'); },
 
