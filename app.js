@@ -69,6 +69,28 @@ function findWine(r) {
   for (var i = 0; i < ALL_WINES.length; i++) if (ALL_WINES[i].rowIndex === r) return ALL_WINES[i];
   return null;
 }
+/**
+ * 이 와인에 대해 AI에게 정보를 물어볼 때가 됐는지.
+ * 한 번 물어본 와인은 "정보갱신일"이 찍히니, 아직 빈칸이 남아 있어도 다시 묻지 않는다 —
+ * AI도 끝내 못 알아내는 와인이 있는데, 그런 와인은 상세를 열 때마다 매번 똑같은 질문을
+ * 다시 하게 돼서 느리고 API 비용도 계속 나갔다. 대신 3개월이 지나면 한 번 더 물어본다
+ * (페어링 캐시와 같은 주기).
+ */
+function infoAskDue(w) {
+  var stamped = String(w['정보갱신일'] || '');
+  if (!stamped) return true;
+  var cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 3);
+  var y = cutoff.getFullYear(), m = ('0' + (cutoff.getMonth() + 1)).slice(-2), d = ('0' + cutoff.getDate()).slice(-2);
+  return stamped < (y + '-' + m + '-' + d);
+}
+
+/** 상세/일괄채우기에서 "아직 비어 있는 정보가 있나" 판단 (같은 기준을 두 곳에서 쓴다) */
+function infoIncomplete(w) {
+  return !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['베스트페어링'] ||
+    !w['품종'] || !w['생산지/국가'] || !w['와인배경'] || !w['평균가격(국내·원)'];
+}
+
 function starsHtml(n) {
   n = parseInt(n, 10) || 0;
   var s = '';
@@ -151,24 +173,25 @@ function bulkFillWineInfo() {
   var status = document.getElementById('bulkFillStatus');
 
   function start(wines) {
-    var targets = wines.filter(function (w) {
-      return !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['베스트페어링'] || !w['생산지/국가'] ||
-        !w['와인배경'] || !w['평균가격(국내·원)'];
-    });
+    var targets = wines.filter(function (w) { return infoIncomplete(w) && infoAskDue(w); });
     if (!targets.length) { status.textContent = '이미 다 채워져 있어요 ✨'; return; }
 
     BULK_FILL_RUNNING = true;
-    var i = 0;
+    var i = 0, failed = 0, lastErr = '';
     function next() {
       if (i >= targets.length) {
         BULK_FILL_RUNNING = false;
-        status.textContent = targets.length + '병 업데이트 완료 ✨';
+        // 실패한 걸 성공이라고 하지 않는다 — 몇 병이 왜 안 됐는지 그대로 알려준다.
+        status.textContent = failed
+          ? (targets.length - failed) + '병 완료, ' + failed + '병 실패' + (lastErr ? ' (' + lastErr + ')' : '')
+          : targets.length + '병 업데이트 완료 ✨';
         load();
         return;
       }
       var w = targets[i];
       status.textContent = '업데이트 중… (' + (i + 1) + '/' + targets.length + ') ' + w['와인명'];
-      callAPI(function () { return API.suggestWineInfo(w.rowIndex); }).then(function () {
+      callAPI(function () { return API.suggestWineInfo(w.rowIndex); }).then(function (res) {
+        if (!res || res.error) { failed++; lastErr = (res && res.error) || '응답 없음'; }
         i++;
         next();
       });
@@ -446,11 +469,11 @@ function cardHtml(w, extraHtml) {
 function openDetail(r) {
   var w = findWine(r); if (!w) return;
   DETAIL_ROW = r;
-  // 아래 중 하나라도 비어 있으면 AI로 한 번에 보충한다. 응답이 와도 결과만 반영하고
-  // (품종/생산지처럼 AI도 끝내 못 알아낼 수 있는 필드가 있으니) 다시 조회하지 않는다 —
-  // 그렇지 않으면 계속 비어 있는 채로 매번 재호출되는 무한 루프가 될 수 있다.
-  var needSuggest = !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['베스트페어링'] || !w['품종'] || !w['생산지/국가'] ||
-    !w['와인배경'] || !w['평균가격(국내·원)'];
+  // 비어 있는 정보가 있고, 아직 AI에게 안 물어봤을 때만 한 번에 보충한다.
+  // 응답이 와도 결과만 그 자리에 반영하고 다시 조회하지 않는다(재호출 루프 방지).
+  // 물어본 뒤엔 서버가 "정보갱신일"을 찍어서, AI가 끝내 못 알아낸 와인이라도
+  // 상세를 열 때마다 같은 질문을 반복하지 않는다(3개월 뒤 한 번 더 물어봄).
+  var needSuggest = infoIncomplete(w) && infoAskDue(w);
   var photo = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '" style="width:100%;border-radius:14px;margin:14px 0 4px;">' : '';
   var t = typeStyle(w['종류']);
   document.getElementById('detailBody').innerHTML =
@@ -477,7 +500,7 @@ function openDetail(r) {
       ['품종', '생산지/국가', '서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점',
         '내잔추천', '내잔추천별점', '추천 페어링', '추천페어링별점',
         '베스트페어링', '베스트페어링별점',
-        '와인배경', '평균가격(국내·원)'].forEach(function (k) {
+        '와인배경', '평균가격(국내·원)', '정보갱신일'].forEach(function (k) {
         if (res[k]) w[k] = res[k];
       });
       var factsEl = document.getElementById('detailFacts');

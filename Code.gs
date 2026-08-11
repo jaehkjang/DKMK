@@ -29,7 +29,7 @@
 
 var NEW_COLUMNS = ['어울리는잔', '서빙방법', '와인배경', '평점', '한줄평', '함께한음식', '라벨사진', '소유자',
   '서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점', '내잔추천', '내잔추천별점', '추천페어링별점', '재구매의향',
-  '베스트페어링', '베스트페어링별점'];
+  '베스트페어링', '베스트페어링별점', '정보갱신일'];
 var PHOTO_FOLDER_NAME = '와인라벨사진';
 
 /* ===================== API 라우터 ===================== */
@@ -113,16 +113,25 @@ function setupColumns() {
   });
 }
 
+/** 지금 코드가 기대하는 컬럼 목록의 지문. NEW_COLUMNS가 바뀌면 이 값도 바뀐다. */
+function columnsFingerprint_() {
+  return NEW_COLUMNS.join('|');
+}
+
 /**
  * 첫 요청 때 컬럼 설정을 알아서 끝낸다.
- * 한 번 성공하면 SETUP_DONE 표시가 남아 다시 돌지 않는다.
+ * SETUP_DONE에 "완료" 표시가 아니라 그때 맞춰둔 컬럼 목록의 지문을 저장한다 —
+ * 그래서 나중에 새 컬럼이 추가된 코드를 배포하면 지문이 달라져 자동으로 한 번 더
+ * 맞춘다. (예전에는 '1'만 저장해서, 새 컬럼을 추가해도 setup()을 손으로 다시
+ * 돌리기 전까지는 컬럼이 안 생겼고, 그 컬럼에 쓰는 기능이 조용히 실패했다.)
  */
 function ensureSetup_() {
   var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('SETUP_DONE') === '1') return;
+  var want = columnsFingerprint_();
+  if (props.getProperty('SETUP_DONE') === want) return;
   try {
     setupColumns();
-    props.setProperty('SETUP_DONE', '1');
+    props.setProperty('SETUP_DONE', want);
   } catch (err) {
     // 설정이 실패해도 API는 계속 동작하게 둔다. 원인은 checkSetup으로 확인.
     Logger.log('자동 설정 실패: ' + err.message);
@@ -131,8 +140,8 @@ function ensureSetup_() {
 
 /** 수동으로 다시 설정하고 싶을 때 (자동 설정이 실패했을 때 등) */
 function setup() {
-  PropertiesService.getScriptProperties().deleteProperty('SETUP_DONE');
   setupColumns();
+  PropertiesService.getScriptProperties().setProperty('SETUP_DONE', columnsFingerprint_());
   Logger.log('설정 완료. [배포 관리] → 연필(수정) → 버전: 새 버전 → 배포 를 해주세요.');
 }
 
@@ -727,14 +736,34 @@ function suggestWineInfo(token, rowIndex) {
     '평균가격(국내·원)': priceText
   };
 
-  // 원래 비어 있던 필드만 채워서 저장 — 이미 값이 있으면 덮어쓰지 않는다
+  // 원래 비어 있던 필드만 채워서 저장 — 이미 값이 있으면 덮어쓰지 않는다.
+  // 예전엔 필드마다 setValue를 따로 불러서 한 와인에 최대 14번 시트에 썼다(느림).
+  // 지금은 행을 한 번 다시 읽어 메모리에서 고친 뒤 한 번에 되쓴다(읽기 1 + 쓰기 1).
+  // 다시 읽는 이유: 위 Gemini 호출에 몇 초가 걸려서, 그 사이 사용자가 수정 화면에서
+  // 직접 채웠을 수 있다 — 그 값을 덮어쓰지 않으려고 가장 최신 상태를 기준으로 판단한다.
+  var fresh = sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
   var out = {};
+  var changed = false;
   Object.keys(updates).forEach(function (h) {
-    if (wine[h]) { out[h] = wine[h]; return; }
-    if (updates[h] === '' || headers.indexOf(h) === -1) { out[h] = ''; return; }
-    sheet.getRange(rowIndex, colIndex1_(headers, h)).setValue(updates[h]);
+    var idx = headers.indexOf(h);
+    if (idx === -1) { out[h] = ''; return; }
+    if (fresh[idx]) { out[h] = fresh[idx]; return; } // 이미 값이 있으면 그대로 둔다
+    if (updates[h] === '') { out[h] = ''; return; }
+    fresh[idx] = updates[h];
     out[h] = updates[h];
+    changed = true;
   });
+
+  // AI가 아무것도 못 채운 와인이라도 "물어는 봤다"고 남긴다 — 이게 없으면 상세를 열
+  // 때마다 영원히 같은 질문을 다시 해서 매번 느리고 API 비용도 계속 나간다.
+  var stampIdx = headers.indexOf('정보갱신일');
+  if (stampIdx !== -1) {
+    fresh[stampIdx] = todayStr_();
+    out['정보갱신일'] = fresh[stampIdx];
+    changed = true;
+  }
+
+  if (changed) sheet.getRange(rowIndex, 1, 1, headers.length).setValues([fresh]);
   return out;
 }
 
@@ -968,6 +997,13 @@ function pairingCacheKey_(food) {
   return food.split(/[·,]+/).map(function (s) { return s.trim(); }).filter(Boolean).sort().join('·');
 }
 
+/** 지금 보유 중인 와인들의 지문. 와인을 넣거나 마시거나 지우면 값이 달라진다. */
+function cellarSignature_(owned) {
+  return owned.map(function (w) { return w.rowIndex; })
+    .sort(function (a, b) { return a - b; })
+    .join(',');
+}
+
 function getPairingCache_(me, key) {
   var sheet = pairingCacheSheet_();
   var last = sheet.getLastRow();
@@ -1024,9 +1060,15 @@ function recommendByFood(token, food) {
   if (!owned.length && !food) return { picks: [], style: '' };
 
   var cacheKey = food ? pairingCacheKey_(food) : '';
+  var sig = cellarSignature_(owned);
   if (cacheKey) {
     var cached = getPairingCache_(me, cacheKey);
-    if (cached) {
+    // 셀러 구성이 그대로일 때만 캐시를 쓴다. 와인을 새로 넣거나 마시거나 지우면
+    // 지문이 달라져서 다시 물어본다 — 안 그러면 (1) 새로 넣은 와인이 3개월 동안
+    // 한 번도 추천되지 않고, (2) 와인을 지우면 아래 행들이 한 칸씩 당겨져서
+    // 캐시에 저장된 행 번호가 엉뚱한 와인을 가리켜 "다른 와인에 대한 추천 이유"가
+    // 붙어 나온다.
+    if (cached && cached.sig === sig) {
       var ownedById = {};
       owned.forEach(function (w) { ownedById[w.rowIndex] = w; });
       // 캐시엔 와인 id만 있고, 실제 와인 정보는 항상 지금 셀러에서 새로 찾아 붙인다.
@@ -1125,7 +1167,7 @@ function recommendByFood(token, food) {
       var cachePicks = out.map(function (p) {
         return { id: p.wine.rowIndex, reason: p.reason, '별점': p['별점'], matched: p.matched };
       });
-      setPairingCache_(me, cacheKey, { picks: cachePicks, style: style });
+      setPairingCache_(me, cacheKey, { picks: cachePicks, style: style, sig: sig });
     }
     return { picks: out, style: style };
   } catch (e) {
