@@ -298,27 +298,53 @@ function submitChangePw(e) {
  * (받는 사람 기기를 알 수 없으니 아이폰/안드로이드 방법을 함께 적는다).
  */
 
+/**
+ * 홈 화면에 추가하는 방법. 설정 화면에 보여주는 안내와 링크 공유 때 같이 보내는
+ * 문구가 서로 달라지지 않게, 여기 한 곳에만 적어두고 양쪽에서 가져다 쓴다.
+ */
+var INSTALL_HOWTO_TITLE = '📲 홈 화면에 추가하면 앱처럼 쓸 수 있어요';
+var INSTALL_STEPS = [
+  { os: '📱 아이폰 (사파리)', steps: [
+    '이 링크를 사파리로 열기',
+    '하단(또는 상단) 공유 버튼(⬆️) 탭',
+    '아래로 스크롤해서 "홈 화면에 추가" 선택 → 추가'
+  ] },
+  { os: '🤖 안드로이드 (크롬)', steps: [
+    '이 링크를 크롬으로 열기',
+    '우측 상단 점 세 개(⋮) 메뉴 탭',
+    '"설치 및 바로가기 만들기"(또는 "홈 화면에 추가") 선택 → 설치'
+  ] }
+];
+
+/** 공유 메시지에 실어 보낼 평문 버전 */
+function installHowtoText() {
+  return INSTALL_HOWTO_TITLE + '\n\n' + INSTALL_STEPS.map(function (g) {
+    return g.os + '\n' + g.steps.map(function (s, i) { return (i + 1) + '. ' + s; }).join('\n');
+  }).join('\n\n');
+}
+
+/** 설정 화면에 보여줄 HTML 버전 (같은 내용) */
+function renderInstallHowto() {
+  var el = document.getElementById('installHowto');
+  if (!el) return;
+  el.innerHTML = INSTALL_STEPS.map(function (g) {
+    return '<div class="howto-os">' + esc(g.os) + '</div><ol class="howto-steps">' +
+      g.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>';
+  }).join('');
+}
+
 /** 주소에는 로그인 정보가 없으니(로그인은 localStorage에만 있음) 이 페이지 주소만 보낸다. */
 function shareApp() {
   var url = location.origin + location.pathname;
   var intro = '🍷 와인 딸까 말까\n' +
     '우리 집 와인 셀러를 관리하는 앱이에요. 라벨 사진 한 장이면 와인 이름·품종·생산지를 알아서 인식하고, ' +
     '서빙 온도·어울리는 잔·어울리는 음식까지 AI가 알려줘요. 마신 와인은 평점이랑 기록도 남길 수 있어요.';
-  var howto = '📲 홈 화면에 추가하면 앱처럼 쓸 수 있어요\n\n' +
-    '📱 아이폰(사파리)\n' +
-    '1. 이 링크를 사파리로 열기\n' +
-    '2. 하단(또는 상단) 공유 버튼(⬆️) 탭\n' +
-    '3. 아래로 스크롤해서 "홈 화면에 추가" 선택 → 추가\n\n' +
-    '🤖 안드로이드(크롬)\n' +
-    '1. 이 링크를 크롬으로 열기\n' +
-    '2. 우측 상단 점 세 개(⋮) 메뉴 탭\n' +
-    '3. "설치 및 바로가기 만들기"(또는 "홈 화면에 추가") 선택 → 설치';
   // url을 별도 필드로만 넘기면 카카오톡 등 일부 공유 대상이 그 값을 무시하고
   // text만 보여줘서 정작 링크가 안 보이는 경우가 있다 — text 안에도 링크를 직접 넣어
   // 어떤 공유 대상이든 항상 링크가 보이게 한다.
   var data = {
     title: '와인 딸까 말까',
-    text: intro + '\n\n' + howto + '\n\n👉 ' + url,
+    text: intro + '\n\n' + installHowtoText() + '\n\n👉 ' + url,
     url: url
   };
   if (navigator.share) {
@@ -1136,6 +1162,7 @@ function renderStats() {
 
 renderTypeChips();
 renderQuickFoods();
+renderInstallHowto();
 bootstrap();
 
 // 안드로이드 크롬이 홈 화면 아이콘을 manifest.json대로 제대로 그리려면
