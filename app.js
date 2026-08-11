@@ -173,7 +173,11 @@ function bulkFillWineInfo() {
   var status = document.getElementById('bulkFillStatus');
 
   function start(wines) {
-    var targets = wines.filter(function (w) { return infoIncomplete(w) && infoAskDue(w); });
+    // 마신 와인은 건너뛴다 — 이미 비운 병이라 서빙·페어링 정보를 채워봐야 쓸 데가 없고,
+    // 한 병당 AI 호출이 한 번씩 나가서 시간과 비용만 든다(버튼 문구도 "보유 와인").
+    var targets = wines.filter(function (w) {
+      return w['상태'] === '보유' && infoIncomplete(w) && infoAskDue(w);
+    });
     if (!targets.length) { status.textContent = '이미 다 채워져 있어요 ✨'; return; }
 
     BULK_FILL_RUNNING = true;
@@ -1008,8 +1012,8 @@ function runRecommend(food) {
 /* ---------- 기록 ---------- */
 /**
  * 기록(통계)은 getWines가 이미 내려준 것과 같은 데이터로 계산할 수 있어서
- * (서버 getStats도 내부적으로 getWines부터 다시 부른다) 캐시가 있으면
- * 서버를 또 부르지 않고 그 자리에서 바로 계산한다.
+ * 캐시가 있으면 서버를 또 부르지 않고 그 자리에서 바로 계산한다.
+ * (그래서 서버에는 통계용 엔드포인트를 따로 두지 않는다.)
  */
 function loadStats() {
   var area = document.getElementById('statArea');
@@ -1028,7 +1032,10 @@ function loadStats() {
   renderStats();
 }
 
-/** "품종" 필드에서 개별 품종 이름만 뽑아낸다(블렌드는 각 품종에 1씩). Code.gs parseGrapes_와 동일 로직. */
+/**
+ * "품종" 필드에서 개별 품종 이름만 뽑아낸다(블렌드는 각 품종에 1씩).
+ * 예: "카베르네 소비뇽 60%·메를로 40%" → ["카베르네 소비뇽", "메를로"]
+ */
 function parseGrapesClient(raw) {
   return String(raw || '')
     .split(/[·,、]/)
