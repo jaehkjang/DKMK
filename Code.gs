@@ -83,7 +83,6 @@ function dispatch_(action, p) {
     case 'recognizeLabel':   return recognizeLabel(token, p.photo);
     case 'recognizeCellar':  return recognizeCellar(token, p.photo);
     case 'recommendByFood':  return recommendByFood(token, p.food);
-    case 'getStats':         return getStats(token);
     case 'getAdminOverview': return getAdminOverview(token);
     case 'getGlasses':       return getGlasses(token);
     case 'addGlass':         return addGlass(token, p.name);
@@ -1208,48 +1207,4 @@ function recommendByKeyword_(food, owned, liked) {
     .sort(function (a, b) { return b.score - a.score; })
     .slice(0, 3)
     .map(function (x) { return { wine: x.wine, reason: '' }; });
-}
-
-/**
- * "품종" 필드에서 개별 품종 이름만 뽑아낸다.
- * 예: "카베르네 소비뇽 60%·메를로 40%" → ["카베르네 소비뇽", "메를로"]
- * 블렌드 와인 한 병은 섞인 품종 각각에 1씩 잡힌다(비율 가중은 하지 않음 — 병 수 기준 집계).
- */
-function parseGrapes_(raw) {
-  return String(raw || '')
-    .split(/[·,、]/)
-    .map(function (s) {
-      return s.replace(/\d+(\.\d+)?\s*%/g, '').replace(/[()]/g, '').trim();
-    })
-    .filter(Boolean);
-}
-
-/** 소비 통계: 월별 / 종류별 / 품종별 / 가격대별 마신 와인 집계 */
-function getStats(token) {
-  var data = getWines(token);
-  var drunk = data.wines.filter(function (w) { return w['상태'] === '마심'; });
-
-  var byMonth = {}, byType = {}, byGrape = {}, byPrice = {};
-  drunk.forEach(function (w) {
-    var month = (w['마신날짜'] || '').slice(0, 7); // yyyy-MM
-    if (month) byMonth[month] = (byMonth[month] || 0) + 1;
-
-    var type = w['종류'] || '기타';
-    byType[type] = (byType[type] || 0) + 1;
-
-    var grapes = parseGrapes_(w['품종']);
-    if (!grapes.length) grapes = ['품종 미상'];
-    grapes.forEach(function (g) { byGrape[g] = (byGrape[g] || 0) + 1; });
-
-    var priceMatch = String(w['평균가격(국내·원)'] || '').match(/[\d,]+/);
-    var priceNum = priceMatch ? parseInt(priceMatch[0].replace(/,/g, ''), 10) : 0;
-    var bracket = !priceNum ? '가격정보없음'
-      : priceNum < 30000 ? '3만원 미만'
-      : priceNum < 70000 ? '3~7만원'
-      : priceNum < 150000 ? '7~15만원'
-      : '15만원 이상';
-    byPrice[bracket] = (byPrice[bracket] || 0) + 1;
-  });
-
-  return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byGrape: byGrape, byPrice: byPrice };
 }

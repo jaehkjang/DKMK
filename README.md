@@ -106,9 +106,11 @@ node overflow_check.js # 좁은 화면 가로 넘침 검증
 | `recognizeLabel` (token, photo) | 라벨 1병 인식 |
 | `recognizeCellar` (token, photo) | 셀러 사진에서 여러 병 인식 + 중복 표시 |
 | `recommendByFood` (token, food) | 음식 → { picks: 보유 와인 추천(셀러 페어링 정보와 직접 일치하면 matched:true, AI 실패 시 키워드로 대체), style: 셀러와 무관한 일반적인 페어링 스타일 설명 } |
-| `getStats` (token) | 소비 통계 |
+| `getAdminOverview` (token) | 관리자(dkmk) 전용 — 전체 사용자 목록과 사용도 |
 
-Apps Script 편집기에서 직접 실행하는 관리용 함수도 있습니다: `setup()`(설정 재실행), `checkSetup()`(속성·시트·컬럼 상태 점검).
+소비 통계는 서버를 따로 부르지 않습니다. `getWines`로 이미 받은 목록으로 화면(`computeStats`)에서 바로 계산합니다 — 같은 데이터를 두 번 왕복하지 않으려고요.
+
+Apps Script 편집기에서 직접 실행하는 관리용 함수도 있습니다: `setup()`(설정 재실행), `checkSetup()`(속성·시트·컬럼 상태 점검). 다만 새 컬럼은 배포만 하면 첫 요청에서 자동으로 추가되므로(`ensureSetup_`가 컬럼 목록의 지문을 비교), 보통은 `setup()`을 손으로 돌릴 일이 없습니다.
 
 ## 셀러(계정)
 
