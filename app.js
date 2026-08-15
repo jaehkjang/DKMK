@@ -435,11 +435,12 @@ function setSeg(v) {
   renderList();
 }
 /** 와인을 담은 직후엔 '마신 와인'이 아니라 방금 담은 게 보이는 보유 칸으로 */
-function goCellarOwned() {
-  SEG = '보유';
-  document.querySelectorAll('.seg div').forEach(function (d) { d.classList.toggle('on', d.dataset.s === '보유'); });
+function goCellarSeg(seg) {
+  SEG = seg;
+  document.querySelectorAll('.seg div').forEach(function (d) { d.classList.toggle('on', d.dataset.s === seg); });
   showPage('Cellar');
 }
+function goCellarOwned() { goCellarSeg('보유'); }
 
 function renderList() {
   var q = (document.getElementById('search').value || '').trim().toLowerCase();
@@ -623,6 +624,12 @@ function startEdit(r) {
   document.getElementById('pickArea').style.display = 'none';
   document.getElementById('addBtn').textContent = '수정하기';
 
+  // 이미 마신 와인이면 별점도 여기서 고칠 수 있게 — 마시기 기록 당시 잘못 눌렀을 때
+  // 다시 "마시기"를 거치지 않고 바로잡게 하려는 것.
+  var isDrunk = w['상태'] === '마심';
+  document.getElementById('editRatingBox').style.display = isDrunk ? '' : 'none';
+  if (isDrunk) { EDIT_RATING = parseInt(w['평점'], 10) || 0; renderEditStars(); }
+
   showPage('Add');
   document.getElementById('pgTitle').textContent = '와인 수정';
 }
@@ -642,6 +649,8 @@ function resetAddForm() {
   document.getElementById('photoPreview').innerHTML = '';
   document.getElementById('photoNote').innerHTML = '';
   document.getElementById('addBtn').textContent = '셀러에 넣기';
+  document.getElementById('editRatingBox').style.display = 'none';
+  EDIT_RATING = 0;
 }
 
 /* ---------- 마시기 ---------- */
@@ -657,16 +666,26 @@ function openDrinkModal(r) {
   document.getElementById('drinkFood').value = '';
   renderStars(); renderRepurchaseChips(); om('drinkModal');
 }
-function renderStars() {
-  var el = document.getElementById('starPick');
+/** 별점 입력 UI. 마시기 모달과 수정 폼(마신 와인의 평점 고치기)이 같이 쓴다. */
+function renderStarPicker(elId, current, onPick) {
+  var el = document.getElementById(elId);
   el.innerHTML = '';
   for (var i = 1; i <= 5; i++) {
     var s = document.createElement('span');
     s.textContent = '★';
-    s.className = i <= CURRENT_RATING ? 'on' : '';
-    s.onclick = (function (v) { return function () { CURRENT_RATING = v; renderStars(); }; })(i);
+    s.className = i <= current ? 'on' : '';
+    s.onclick = (function (v) { return function () { onPick(v); }; })(i);
     el.appendChild(s);
   }
+}
+function renderStars() {
+  renderStarPicker('starPick', CURRENT_RATING, function (v) { CURRENT_RATING = v; renderStars(); });
+}
+
+/** 수정 폼에서 마신 와인의 평점을 고칠 때 쓰는 상태 */
+var EDIT_RATING = 0;
+function renderEditStars() {
+  renderStarPicker('editStarPick', EDIT_RATING, function (v) { EDIT_RATING = v; renderEditStars(); });
 }
 function renderRepurchaseChips() {
   var el = document.getElementById('repurchaseChips');
@@ -973,6 +992,8 @@ function submitAdd(e) {
   if (!data['와인명']) { toast('와인 이름을 적어주세요'); return; }
 
   var editing = EDIT_ROW !== null;
+  var editingDrunk = editing && document.getElementById('editRatingBox').style.display !== 'none';
+  if (editingDrunk) data['평점'] = EDIT_RATING;
   // 인식할 때 사진을 이미 올려뒀으면(PHOTO_UPLOADED_URL) 그 주소를 그대로 쓰고,
   // 아니면(직접입력·인식 실패 등) 원본 데이터를 지금 올린다.
   var photo = PHOTO_UPLOADED_URL || PHOTO_DATAURL;
@@ -989,7 +1010,9 @@ function submitAdd(e) {
     toast(editing ? '수정했어요' : '셀러에 담았어요 🍾');
     resetAddForm();
     btn.disabled = false;
-    goCellarOwned();
+    // 마신 와인을 수정했으면 "마심" 탭으로, 새로 담았거나 보유 와인을 고쳤으면 "보유" 탭으로 —
+    // 안 그러면 방금 고친 와인이 안 보이는 탭으로 튕겨서 "수정이 안 됐나?" 싶어진다.
+    editingDrunk ? goCellarSeg('마심') : goCellarOwned();
   });
 }
 
