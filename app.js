@@ -514,6 +514,7 @@ function openDetail(r) {
     '<div class="facts" id="detailFacts">' + detailFactsHtml(w) + '</div>' +
     '<div id="servingBox">' + (servingFactsHtml(w) || (needSuggest ? '<div class="note" id="servingSuggest" style="margin-top:12px">🍷 부족한 정보 AI로 채우는 중…</div>' : '')) + '</div>' +
     '<div class="act-row" style="margin-top:14px">' +
+    '<button class="act" onclick="shareWine(' + r + ')"><span class="ic">🔗</span>공유</button>' +
     '<button class="act" onclick="startEdit(' + r + ')"><span class="ic">✏️</span>수정</button>' +
     '<button class="act" onclick="deleteWineConfirm(' + r + ')"><span class="ic">🗑</span>삭제</button>' +
     '</div>' +
@@ -586,6 +587,37 @@ function servingFactsHtml(w) {
   return '<div class="facts" style="margin-top:0">' + rows.map(function (f) {
     return '<div class="fact"><div class="k">' + f[0] + '</div><div class="v">' + esc(f[1]) + '</div></div>';
   }).join('') + '</div>';
+}
+
+/**
+ * 와인 상세 정보를 공유한다. 보유 와인이든 마신 와인이든 내용은 똑같다 —
+ * 품종·생산지·빈티지·가격·서빙 정보·잔 추천·페어링·배경만 보낸다.
+ * 마신 기록(별점·한줄평·재구매 의향·마신 날짜)은 내 개인 평가라서 일부러 뺀다.
+ */
+function shareWineText(w) {
+  var lines = ['🍷 ' + (w['와인명'] || '')];
+  var t = typeStyle(w['종류']);
+  lines.push(t.n);
+  [['품종', w['품종']], ['생산지', w['생산지/국가']], ['빈티지', w['빈티지']], ['가격', w['평균가격(국내·원)']]]
+    .forEach(function (f) { if (f[1]) lines.push(f[0] + ': ' + f[1]); });
+  if (w['서빙온도']) lines.push('서빙 온도: ' + w['서빙온도']);
+  if (w['에어링시간']) lines.push('에어링 시간: ' + w['에어링시간']);
+  if (w['완벽한잔']) lines.push('완벽한 잔: ' + w['완벽한잔'] + (w['완벽한잔별점'] ? ' ' + starsHtml(w['완벽한잔별점']) : ''));
+  if (w['내잔추천']) lines.push('내 잔 추천: ' + w['내잔추천'] + (w['내잔추천별점'] ? ' ' + starsHtml(w['내잔추천별점']) : ''));
+  if (w['베스트페어링']) lines.push('클래식 페어링 음식: ' + w['베스트페어링'] + (w['베스트페어링별점'] ? ' ' + starsHtml(w['베스트페어링별점']) : ''));
+  if (w['추천 페어링']) lines.push('제안 페어링 음식: ' + w['추천 페어링'] + (w['추천페어링별점'] ? ' ' + starsHtml(w['추천페어링별점']) : ''));
+  if (w['와인배경']) lines.push('\n' + w['와인배경']);
+  return lines.join('\n');
+}
+function shareWine(r) {
+  var w = findWine(r); if (!w) return;
+  var text = shareWineText(w);
+  var data = { title: w['와인명'] || '와인 정보', text: text };
+  if (navigator.share) {
+    navigator.share(data).catch(function () { copyText(text); });
+  } else {
+    copyText(text);
+  }
 }
 
 /** 실수로 등록한 와인 삭제 (되돌리기 불가라 한 번 더 확인) */
