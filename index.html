@@ -103,6 +103,10 @@
       <!-- 직접 입력 폼 -->
       <form id="addForm" onsubmit="submitAdd(event)">
         <div class="field big"><input id="f_와인명" placeholder="와인 이름" required></div>
+        <div id="editRatingBox" style="display:none;margin-bottom:12px">
+          <div style="font-size:13px;font-weight:800;color:var(--sub);margin-bottom:6px">평점</div>
+          <div class="star-pick" id="editStarPick" style="justify-content:flex-start;margin:0;font-size:32px"></div>
+        </div>
         <div class="chips" id="typeChips"></div>
         <div class="duo">
           <div class="field"><input id="f_품종" placeholder="품종" oninput="checkSimilar()"></div>
