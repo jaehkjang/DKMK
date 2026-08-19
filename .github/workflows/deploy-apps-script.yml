@@ -1,0 +1,35 @@
+name: Apps Script 자동 배포
+
+# Code.gs가 main에 반영될 때마다 clasp로 Apps Script에 push하고
+# 기존 웹 앱 배포(주소 고정)를 새 버전으로 갱신한다.
+# 최초 1회 설정은 README.md의 "Apps Script 자동 배포 설정" 참고.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Code.gs"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install -g @google/clasp
+
+      - name: clasp 인증 정보 복원
+        run: echo "${{ secrets.CLASPRC_JSON_B64 }}" | base64 -d > "$HOME/.clasprc.json"
+
+      - name: clasp 프로젝트 설정 복원
+        run: echo "${{ secrets.CLASP_JSON_B64 }}" | base64 -d > .clasp.json
+
+      - name: Code.gs push
+        run: clasp push --force
+
+      - name: 웹 앱 새 버전으로 재배포 (주소 유지)
+        run: clasp deploy --deploymentId "${{ secrets.CLASP_DEPLOYMENT_ID }}" --description "auto-deploy ${{ github.sha }}"
