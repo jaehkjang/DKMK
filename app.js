@@ -612,12 +612,33 @@ function shareWineText(w) {
 function shareWine(r) {
   var w = findWine(r); if (!w) return;
   var text = shareWineText(w);
-  var data = { title: w['와인명'] || '와인 정보', text: text };
-  if (navigator.share) {
-    navigator.share(data).catch(function () { copyText(text); });
-  } else {
-    copyText(text);
+  var title = w['와인명'] || '와인 정보';
+
+  function shareTextOnly() {
+    if (navigator.share) navigator.share({ title: title, text: text }).catch(function () { copyText(text); });
+    else copyText(text);
   }
+
+  if (!w['라벨사진'] || !navigator.share) { shareTextOnly(); return; }
+
+  // 사진도 같이 보내본다. 구글 CDN에서 받아오는 사진이라 fetch가 막힐 수도 있고
+  // (브라우저에 <img>로 보여주는 건 되지만 fetch로 바이트를 읽어오는 건 CORS가
+  // 따로 허용돼야 한다), 파일 공유 자체를 브라우저가 지원 안 할 수도 있다 —
+  // 어느 쪽이든 실패하면 조용히 텍스트만 공유한다(사용자가 보기엔 그냥 평소처럼 동작).
+  fetch(w['라벨사진']).then(function (res) {
+    if (!res.ok) throw new Error('fetch failed');
+    return res.blob();
+  }).then(function (blob) {
+    var file = new File([blob], '와인라벨.jpg', { type: blob.type || 'image/jpeg' });
+    var data = { title: title, text: text, files: [file] };
+    if (navigator.canShare && !navigator.canShare(data)) throw new Error('file share unsupported');
+    return navigator.share(data);
+  }).catch(function (err) {
+    // 사용자가 공유 시트를 직접 취소한 경우(AbortError)까지 텍스트로 재시도하면
+    // 원치 않는 동작이 겹쳐 뜬다 — 그때는 그냥 둔다.
+    if (err && err.name === 'AbortError') return;
+    shareTextOnly();
+  });
 }
 
 /** 실수로 등록한 와인 삭제 (되돌리기 불가라 한 번 더 확인) */
