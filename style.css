@@ -218,6 +218,10 @@
     .admin-row-top { display:flex; align-items:baseline; gap:7px; font-size:14px; }
     .admin-id { font-size:12px; color:var(--sub); font-weight:600; }
     .admin-row-stats { font-size:12px; color:var(--sub); margin-top:3px; line-height:1.5; }
+    .admin-del-btn {
+    margin-left:auto; border:1px solid var(--line); background:var(--surface); color:var(--wine);
+    font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:20px; cursor:pointer;
+    }
 
     .facts { margin-top:16px; }
     .fact { padding:12px 0; border-bottom:1px solid var(--line); }
