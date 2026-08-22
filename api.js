@@ -65,6 +65,7 @@ const API = {
   // ── 추천 / 통계 ──
   recommendByFood(food)    { return this._get('recommendByFood', { food }); },
   getAdminOverview()       { return this._get('getAdminOverview'); },
+  deleteUserAccount(id)    { return this._post('deleteUserAccount', { id }); },
 
   // ── 내 잔 ──
   getGlasses()              { return this._get('getGlasses'); },

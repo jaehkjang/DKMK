@@ -84,6 +84,7 @@ function dispatch_(action, p) {
     case 'recognizeCellar':  return recognizeCellar(token, p.photo);
     case 'recommendByFood':  return recommendByFood(token, p.food);
     case 'getAdminOverview': return getAdminOverview(token);
+    case 'deleteUserAccount': return deleteUserAccount(token, p.id);
     case 'getGlasses':       return getGlasses(token);
     case 'addGlass':         return addGlass(token, p.name);
     case 'deleteGlass':      return deleteGlass(token, p.row);
@@ -495,6 +496,54 @@ function getAdminOverview(token) {
     totalWines: lastRow >= 2 ? lastRow - 1 : 0,
     users: users
   };
+}
+
+/**
+ * 어떤 시트에서 특정 컬럼(0-based) 값이 targetId인 행을 전부 지운다.
+ * 아래에서 위로 지워야 삭제하면서 행 번호가 밀리는 문제가 없다.
+ */
+function deleteRowsWhereColumnEquals_(sheet, colIndex0, targetId, headerRows) {
+  var last = sheet.getLastRow();
+  if (colIndex0 === -1 || last <= headerRows) return 0;
+  var values = sheet.getRange(headerRows + 1, colIndex0 + 1, last - headerRows, 1).getValues();
+  var count = 0;
+  for (var i = values.length - 1; i >= 0; i--) {
+    if (String(values[i][0]).trim() === targetId) {
+      sheet.deleteRow(headerRows + 1 + i);
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * 관리자(ADMIN_ID)가 사용자 계정을 완전히 삭제한다. 계정만 지우는 게 아니라
+ * 그 사람이 등록한 와인·잔·페어링 캐시까지 전부 지운다 — 로그인 못 하는
+ * 계정에 데이터만 남겨두면 나중에 다른 사람이 같은 이름으로 새로 가입했을 때
+ * 엉뚱한 옛날 데이터를 물려받게 되기 때문. 되돌릴 수 없다.
+ * 관리자 자기 자신은 지울 수 없다(실수로 관리자 계정을 날리는 것 방지).
+ */
+function deleteUserAccount(token, targetId) {
+  var admin = requireUser_(token);
+  if (String(admin['아이디']) !== ADMIN_ID) throw new Error('관리자만 할 수 있어요');
+
+  targetId = normName_(targetId);
+  if (!targetId) return { error: '아이디를 알려주세요' };
+  if (targetId === ADMIN_ID) return { error: '관리자 계정은 삭제할 수 없어요' };
+
+  var target = findUser_(targetId);
+  if (!target) return { error: '없는 사용자예요' };
+
+  var wineHeaders = getHeaders_();
+  var deletedWines = deleteRowsWhereColumnEquals_(getSheet_(), wineHeaders.indexOf(OWNER_COLUMN), targetId, 1);
+  var deletedGlasses = deleteRowsWhereColumnEquals_(glassSheet_(), GLASS_COLUMNS.indexOf('소유자'), targetId, 1);
+  deleteRowsWhereColumnEquals_(pairingCacheSheet_(), PAIRING_CACHE_COLUMNS.indexOf('소유자'), targetId, 1);
+
+  // 다른 함수들 실행 도중 target.rowIndex가 가리키던 사용자 시트 자체는 안 바뀌니
+  // (와인/잔/캐시는 다른 시트) 처음 찾은 rowIndex 그대로 지워도 안전하다.
+  userSheet_().deleteRow(target.rowIndex);
+
+  return { ok: true, deletedWines: deletedWines, deletedGlasses: deletedGlasses };
 }
 
 /* ===================== 와인 목록 ===================== */

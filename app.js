@@ -153,12 +153,37 @@ function loadAdminOverview() {
     if (!data.users.length) { el.innerHTML = '<div class="note">아직 가입한 사용자가 없어요</div>'; return; }
     el.innerHTML = '<div class="admin-summary">총 ' + data.totalUsers + '명 · 등록된 와인 ' + data.totalWines + '병</div>' +
       data.users.map(function (u) {
+        // 관리자 자기 자신은 삭제 버튼을 아예 안 보여준다(서버도 막지만, UI에서도 헷갈리지 않게).
+        var delBtn = u.아이디 === 'dkmk' ? '' :
+          '<button type="button" class="admin-del-btn" data-id="' + esc(u.아이디) + '" data-name="' + esc(u.이름) + '">삭제</button>';
         return '<div class="admin-row">' +
-          '<div class="admin-row-top"><b>' + esc(u.이름) + '</b><span class="admin-id">@' + esc(u.아이디) + '</span></div>' +
+          '<div class="admin-row-top"><b>' + esc(u.이름) + '</b><span class="admin-id">@' + esc(u.아이디) + '</span>' + delBtn + '</div>' +
           '<div class="admin-row-stats">보유 ' + u.보유 + '병 · 마심 ' + u.마심 + '병 · 가입 ' + esc(u.가입일) +
           ' · 최근 로그인 ' + esc(u.마지막로그인) + (u.마지막활동 ? ' · 최근 활동 ' + esc(u.마지막활동) : '') + '</div>' +
           '</div>';
       }).join('');
+    // 아이디·이름을 onclick 문자열 안에 직접 끼워 넣지 않는다 — esc()는 속성값 이스케이프용이라
+    // 작은따옴표(')는 그대로 통과시킨다. 이름에 작은따옴표가 있으면 인라인 onclick이 깨지므로
+    // (예: "O'Brien"), data-* 속성에 담아 아래에서 안전하게 읽어온다.
+    el.querySelectorAll('.admin-del-btn').forEach(function (b) {
+      b.onclick = function () { deleteUserAccountConfirm(b.dataset.id, b.dataset.name); };
+    });
+  });
+}
+
+/**
+ * 사용자 아이디 삭제(관리자 전용). 계정뿐 아니라 그 사람의 와인·잔까지 전부
+ * 지워지는 되돌릴 수 없는 동작이라, 체크박스 하나로는 부족해서 아이디를
+ * 직접 타이핑해서 확인받는다(실수로 잘못 누르는 걸 막으려고).
+ */
+function deleteUserAccountConfirm(id, name) {
+  var typed = prompt('"' + name + '"(@' + id + ') 계정과 등록된 와인·잔이 전부 영구 삭제돼요. 되돌릴 수 없어요.\n\n확인하려면 아이디(' + id + ')를 정확히 입력하세요:');
+  if (typed === null) return;
+  if (typed.trim().toLowerCase() !== id.toLowerCase()) { toast('아이디가 일치하지 않아 취소했어요'); return; }
+  callAPI(function () { return API.deleteUserAccount(id); }).then(function (res) {
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
+    toast('삭제했어요 (와인 ' + res.deletedWines + '병, 잔 ' + res.deletedGlasses + '개 포함)');
+    loadAdminOverview();
   });
 }
 
