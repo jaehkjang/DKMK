@@ -122,6 +122,7 @@ function submitAuth(ev) {
     if (!res || res.error) { err.textContent = (res && res.error) || '문제가 생겼어요'; return; }
     API.setToken(res.token);
     TOKEN = res.token; ME = res.name; IS_ADMIN = !!res.isAdmin;
+    AUTH_RECOVERY_SHOWN = false; // 새로 로그인했으니 다음에 또 끊기면 다시 감지할 수 있게
     document.getElementById('pinScreen').style.display = 'none';
     if (res.moved) toast('기존 와인 ' + res.moved + '병을 가져왔어요');
     else if (res.created) toast(res.name + ' 셀러를 만들었어요 🍾');
@@ -410,12 +411,11 @@ function bootstrap() {
   callAPI(function () { return API.checkToken(); }).then(function (res) {
     if (res && res.ok) {
       ME = res.name; IS_ADMIN = !!res.isAdmin;
+      AUTH_RECOVERY_SHOWN = false;
       document.getElementById('pinScreen').style.display = 'none';
       load();
     } else {
-      API.setToken(''); TOKEN = '';
-      document.getElementById('pinErr').textContent = '다시 들어와주세요';
-      showAuthForm();
+      logout('다시 들어와주세요');
     }
   });
 }
@@ -423,6 +423,44 @@ function bootstrap() {
 function showAuthForm() {
   document.getElementById('authLoading').style.display = 'none';
   document.getElementById('authForm').style.display = '';
+}
+
+/** 설정에서 누르는 로그아웃 버튼 */
+function logoutConfirm() {
+  if (!confirm('로그아웃할까요?')) return;
+  cm('settingsModal');
+  logout();
+}
+
+/**
+ * 로그아웃. 설정에서 사용자가 직접 누르거나(msg 없이 호출), 어떤 이유로든 토큰이
+ * 더 이상 유효하지 않다는 응답을 받았을 때(handleAuthExpired) 자동으로도 불린다.
+ * 세션 캐시(ALL_WINES 등)도 같이 비워야 다음 로그인 때 남의 데이터가 잠깐이라도
+ * 안 섞여 보인다.
+ */
+function logout(msg) {
+  API.setToken('');
+  TOKEN = ''; ME = ''; IS_ADMIN = false;
+  WINES_LOADED = false; ALL_WINES = [];
+  GLASSES_LOADED = false; MY_GLASSES = [];
+  document.querySelectorAll('.modal-bg').forEach(function (m) { m.classList.remove('on'); });
+  document.getElementById('pinScreen').style.display = '';
+  document.getElementById('pinErr').textContent = msg || '';
+  showAuthForm();
+}
+
+/**
+ * 어떤 이유로든(계정이 삭제됐거나, 토큰 서명 키가 바뀌었거나, 그 밖의 알 수 없는
+ * 원인으로) 서버가 "로그인이 필요해요"/"계정을 찾을 수 없어요"를 돌려주면 여기로
+ * 온다. 이게 없으면 사용자는 같은 오류만 계속 보면서 빠져나갈 방법이 없다 —
+ * 로그아웃 버튼도 없이 갇히는 셈이라, 원인을 몰라도 일단 다시 로그인할 수 있는
+ * 화면으로 돌려보내는 게 가장 확실한 복구 방법이다.
+ */
+var AUTH_RECOVERY_SHOWN = false;
+function handleAuthExpired() {
+  if (AUTH_RECOVERY_SHOWN) return; // 여러 요청이 동시에 실패해도 중복으로 처리하지 않는다
+  AUTH_RECOVERY_SHOWN = true;
+  logout('로그인이 풀렸어요. 다시 들어와주세요.');
 }
 
 /* ---------- 화면 전환 ---------- */

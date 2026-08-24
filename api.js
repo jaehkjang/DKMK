@@ -75,9 +75,18 @@ const API = {
 };
 
 // 네트워크 자체가 끊긴 경우를 잡아주는 안전 래퍼. 서버가 돌려준 {error} 는 그대로 통과시킨다.
+//
+// 토큰이 어떤 이유로든 더 이상 유효하지 않으면(로그인이 필요해요/계정을 찾을 수 없어요)
+// 여기서 한 곳에서 잡아서 app.js의 handleAuthExpired()로 넘긴다 — 모든 API 호출이
+// callAPI를 거치기 때문에, 개별 화면마다 "혹시 로그인이 풀렸으면" 처리를 반복해서
+// 넣지 않아도 앱 전체가 한 번에 자동으로 로그인 화면으로 돌아간다.
+const AUTH_ERROR_MESSAGES = ['로그인이 필요해요', '계정을 찾을 수 없어요'];
 async function callAPI(promiseFactory) {
   try {
     const res = await promiseFactory();
+    if (res && AUTH_ERROR_MESSAGES.includes(res.error) && typeof handleAuthExpired === 'function') {
+      handleAuthExpired();
+    }
     return res;
   } catch (e) {
     return { error: '인터넷 연결을 확인해주세요' };
