@@ -199,8 +199,28 @@ function getSS_() {
   return ss;
 }
 
+/**
+ * 와인 시트를 찾는다. 다른 시트(사용자/내잔/페어링캐시)는 다 이름으로 찾는데
+ * 이것만 "첫 번째 시트"로 찾다 보니, 구글 시트 UI에서 실수로 탭 순서를 바꾸면
+ * 조용히 엉뚱한 시트를 와인 시트로 착각하는 구조였다. 첫 번째 시트가 와인
+ * 데이터처럼 안 보이면(헤더에 '와인명'이 없으면) 전체 시트를 뒤져서 찾는다 —
+ * 평소엔 검사 한 번 더 하는 것뿐이라 느려지지 않고, 탭 순서가 꼬였을 때만
+ * 자동으로 복구된다.
+ */
 function getSheet_() {
-  return getSS_().getSheets()[0];
+  var sheets = getSS_().getSheets();
+  var first = sheets[0];
+  if (looksLikeWineSheet_(first)) return first;
+  for (var i = 1; i < sheets.length; i++) {
+    if (looksLikeWineSheet_(sheets[i])) return sheets[i];
+  }
+  return first; // 못 찾으면 원래 하던 대로 — 새 스프레드시트라 아직 헤더가 없는 경우 등
+}
+
+function looksLikeWineSheet_(sheet) {
+  if (!sheet || sheet.getLastColumn() === 0) return false;
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  return headers.indexOf('와인명') !== -1;
 }
 
 function getHeaders_() {
