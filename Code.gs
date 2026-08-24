@@ -879,22 +879,34 @@ function callGemini_(parts) {
   if (!apiKey) throw new Error('GEMINI_API_KEY가 설정되지 않았어요 (스크립트 속성에 추가해주세요)');
 
   var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=' + encodeURIComponent(apiKey);
-  var resp = UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({
-      contents: [{ parts: parts }],
-      generationConfig: { responseMimeType: 'application/json' }
-    }),
-    muteHttpExceptions: true
+  var body = JSON.stringify({
+    contents: [{ parts: parts }],
+    generationConfig: { responseMimeType: 'application/json' }
   });
 
-  var status = resp.getResponseCode();
+  // 429(요청이 몰림)/503(모델이 일시적으로 붐빔)은 구글 쪽 안내대로 "잠시 후 다시
+  // 시도하면" 대부분 풀린다. 사용자가 직접 재시도 버튼을 누르게 하지 않고 여기서
+  // 짧게 쉬었다 몇 번 더 해본다 — 그래도 안 되면 그때 가서 알기 쉬운 안내로 넘어간다.
+  var status, resp;
+  var maxAttempts = 3;
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    resp = UrlFetchApp.fetch(url, { method: 'post', contentType: 'application/json', payload: body, muteHttpExceptions: true });
+    status = resp.getResponseCode();
+    if ((status === 429 || status === 503) && attempt < maxAttempts) {
+      Utilities.sleep(1500 * attempt);
+      continue;
+    }
+    break;
+  }
+
   if (status === 401 || status === 403) {
     throw new Error('GEMINI_API_KEY가 잘못됐거나 만료됐어요. https://aistudio.google.com/apikey 에서 키를 다시 확인하고 스크립트 속성에 다시 저장한 뒤, 배포 관리 → 새 버전으로 재배포해주세요. (' + status + ')');
   }
   if (status === 404 && /is no longer available/.test(resp.getContentText())) {
     throw new Error('AI 모델(' + GEMINI_MODEL + ')이 구글에서 서비스 종료됐어요. Code.gs의 GEMINI_MODEL 값을 https://ai.google.dev/gemini-api/docs/models 에서 최신 모델 이름으로 바꾸고 재배포해주세요. (404)');
+  }
+  if (status === 429 || status === 503) {
+    throw new Error('지금 AI 서버가 많이 붐벼요. 잠시 후(1분 정도) 다시 시도해주세요. (' + status + ')');
   }
   if (status !== 200) {
     throw new Error('AI 호출 실패 (' + status + '): ' + resp.getContentText().slice(0, 200));
