@@ -533,12 +533,38 @@ function renderList() {
   area.innerHTML = list.map(function (w) { return cardHtml(w); }).join('');
 }
 
+/**
+ * 가격을 저가/중가/고가/프리미엄 색으로 구분한 작은 배지로 만든다. 목록에서 한눈에
+ * 싼 와인인지 비싼 와인인지 보이게 하려는 것 — 기록 탭 가격대 통계와 같은 기준
+ * (3만/7만/15만원)을 쓴다. 범위로 적혀 있으면("70,000~90,000원") 평균값으로 등급을
+ * 매기고, 표시는 "7~9만원"처럼 축약해서 카드에 자리를 많이 안 차지하게 한다.
+ */
+function priceBadge(w) {
+  var nums = String(w['평균가격(국내·원)'] || '').match(/[\d,]+/g);
+  if (!nums) return '';
+  var vals = nums.map(function (s) { return parseInt(s.replace(/,/g, ''), 10); }).filter(Boolean);
+  if (!vals.length) return '';
+  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  var avg = (lo + hi) / 2;
+  var tier = avg < 30000 ? { c: 'var(--ok)', s: '#E7F2E9' }
+    : avg < 70000 ? { c: 'var(--gold)', s: '#FBF2DC' }
+    : avg < 150000 ? { c: '#C1650A', s: '#FBEAD9' }
+    : { c: 'var(--wine)', s: 'var(--wine-soft)' };
+  var fmt = function (v) { return v >= 10000 ? Math.round(v / 10000) + '만' : Math.round(v / 1000) + '천'; };
+  var loStr = fmt(lo), hiStr = fmt(hi);
+  // 단위(만/천)가 둘 다 같으면 "7만~9만원" 대신 "7~9만원"처럼 뒤쪽 하나에만 붙인다.
+  var text = lo === hi ? loStr + '원'
+    : (loStr.slice(-1) === hiStr.slice(-1) ? loStr.slice(0, -1) : loStr) + '~' + hiStr + '원';
+  return '<span class="tag" style="--c:' + tier.c + ';--c-soft:' + tier.s + '">' + text + '</span>';
+}
+
 function cardHtml(w, extraHtml) {
   var isDrunk = w['상태'] === '마심';
   var t = typeStyle(w['종류']);
   var bits = [w['빈티지'], (w['생산지/국가'] || '').split('/').pop()].filter(Boolean);
   var sub = bits.length ? '<span class="dot">' + esc(bits.join(' · ')) + '</span>' : '';
   var grape = w['품종'] ? '<span class="dot">' + esc(String(w['품종']).split(/[·,]/)[0]) + '</span>' : '';
+  var price = priceBadge(w);
 
   var foot = isDrunk
     ? '<span class="when">' + esc(w['마신날짜']) + '</span>' +
@@ -552,7 +578,7 @@ function cardHtml(w, extraHtml) {
     '<div class="card-head">' + thumb +
     '<div class="card-head-text">' +
     '<div class="name">' + esc(w['와인명']) + '</div>' +
-    '<div class="line"><span class="tag">' + esc(t.n) + '</span>' + grape + sub + '</div>' +
+    '<div class="line"><span class="tag">' + esc(t.n) + '</span>' + price + grape + sub + '</div>' +
     '</div></div>' +
     (extraHtml || '') +
     '<div class="foot">' + foot + '</div>' +
