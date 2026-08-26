@@ -185,6 +185,84 @@ function checkSetup() {
 }
 
 /**
+ * 일회성 정리 함수. Apps Script 편집기에서 함수 선택 → 이 함수 고르고 실행하면 된다
+ * (setup()/checkSetup()과 같은 방식 — 앱에는 이 기능을 위한 버튼을 따로 안 만들었다).
+ *
+ * "한국페어링"(제안 페어링 음식) 프롬프트를 배달 음식 위주로 바꾼 뒤에도, 이미
+ * 값이 채워져 있던 기존 와인들은 자동으로 안 바뀐다 — suggestWineInfo가 이미 값이
+ * 있는 필드는 절대 덮어쓰지 않는 구조라서다(불필요한 재질문을 막으려는 설계인데,
+ * 지금은 그게 오히려 걸림돌이 된 상황). 이 함수는 그 규칙을 무시하고 "추천 페어링"이
+ * 이미 채워진 모든 와인(보유+마심 둘 다 — 마신 와인 상세에도 이 정보가 그대로 보이므로)의
+ * 베스트페어링/한국페어링만 새 기준으로 다시 받아온다. 원래 비어 있던 와인은 건드리지
+ * 않는다(평소 자동완성이 알아서 채운다). 다른 필드(품종·서빙온도·가격 등)는 이미 맞게
+ * 채워져 있으니 다시 안 물어봐서 AI 호출을 최소로 줄인다.
+ *
+ * 실행 로그(보기: 실행 → 실행 로그)에 몇 병을 처리·건너뜀·실패했는지 남는다.
+ * 한 번 돌리고 나면 이 함수는 지워도 되고 남겨둬도 상관없다(다시 실행해도 안전 —
+ * 그냥 다시 한번 새로 받아올 뿐이다).
+ */
+function backfillKoreaPairing() {
+  var sheet = getSheet_();
+  var headers = getHeaders_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('와인이 없어요'); return; }
+
+  var col = {
+    이름: headers.indexOf('와인명'), 종류: headers.indexOf('종류'), 품종: headers.indexOf('품종'),
+    생산지: headers.indexOf('생산지/국가'), 빈티지: headers.indexOf('빈티지'),
+    베스트: headers.indexOf('베스트페어링'), 베스트별점: headers.indexOf('베스트페어링별점'),
+    한국: headers.indexOf('추천 페어링'), 한국별점: headers.indexOf('추천페어링별점')
+  };
+  if (col.한국 === -1) { Logger.log('"추천 페어링" 컬럼이 없어요 — 먼저 setup()을 실행해주세요.'); return; }
+
+  var values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  var done = 0, skipped = 0, failed = 0;
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (!row[col.한국]) { skipped++; continue; } // 원래 비어 있던 건 평소 자동완성이 알아서 채운다
+
+    try {
+      var result = requestFoodPairing_({
+        와인명: row[col.이름], 종류: row[col.종류], 품종: row[col.품종],
+        생산지: row[col.생산지], 빈티지: row[col.빈티지]
+      });
+      var r = i + 2;
+      if (result['베스트페어링'] && result['베스트페어링']['내용']) {
+        sheet.getRange(r, col.베스트 + 1).setValue(result['베스트페어링']['내용']);
+        sheet.getRange(r, col.베스트별점 + 1).setValue(result['베스트페어링']['별점'] || '');
+      }
+      if (result['한국페어링'] && result['한국페어링']['내용']) {
+        sheet.getRange(r, col.한국 + 1).setValue(result['한국페어링']['내용']);
+        sheet.getRange(r, col.한국별점 + 1).setValue(result['한국페어링']['별점'] || '');
+      }
+      done++;
+    } catch (e) {
+      failed++;
+      Logger.log('실패: ' + row[col.이름] + ' — ' + e.message);
+    }
+    Utilities.sleep(300); // 요청이 한꺼번에 몰리지 않게 살짝 간격을 둔다
+  }
+  Logger.log('완료: ' + done + '병 갱신, ' + skipped + '병 건너뜀(원래 비어있었음), ' + failed + '병 실패');
+}
+
+/** backfillKoreaPairing 전용 — 다른 필드는 안 건드리고 음식 추천 두 가지만 다시 받아온다. */
+function requestFoodPairing_(wine) {
+  var prompt = '너는 소믈리에다. 아래 와인에 어울리는 음식을 두 가지로 나눠서 추천해라.\n' +
+    JSON.stringify(wine) + '\n\n' +
+    '"베스트페어링"에는 구하기 쉬운지와 무관하게 이 와인에 정말 이상적으로 어울리는 음식을 2~4가지 적어라. ' +
+    '"한국페어링"에는 한국에서 흔히 배달시켜 먹거나 사 먹는 음식(예: 햄버거, 보쌈, 족발, 피자, 치킨 등)을 ' +
+    '적극적으로 후보에 넣어서 2~4가지를 적어라 — 완벽한 정통 페어링이 아니어도 이 와인과 그럭저럭 잘 어울리면 ' +
+    '추천해도 된다(정말 안 어울리면 빼라). 편하고 흔하다고 별점을 후하게 주지는 말고, 실제로 어울리는 만큼만 ' +
+    '정직하게 매겨라 — 3~4점짜리 추천이어도 괜찮다. 두 목록이 겹쳐도 되고, 한국페어링이 곧 베스트인 경우도 있다. ' +
+    '정말 완벽하게 어울릴 때만 5점을 주고, 자신 없으면 4점 이하로 줘라.\n\n' +
+    '아래 JSON으로만 답해라.\n' +
+    '{"베스트페어링":{"내용":"...","별점":1~5}, "한국페어링":{"내용":"...","별점":1~5}}';
+  var result = callGemini_([{ text: prompt }]);
+  if (!result) throw new Error('추천을 만들지 못했어요');
+  return result;
+}
+
+/**
  * 스프레드시트 가져오기.
  * SHEET_ID 속성이 있으면 그걸로 열고(따로 만든 프로젝트), 없으면 붙어 있는 시트를 쓴다.
  */
