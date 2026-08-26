@@ -546,7 +546,9 @@ function priceBadge(w) {
   if (!vals.length) return '';
   var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
   var avg = (lo + hi) / 2;
-  var tier = avg < 30000 ? { c: 'var(--ok)', s: '#E7F2E9' }
+  // 저가 등급은 var(--ok)(다른 곳과 공유하는 차분한 초록) 대신 눈에 더 쨍하게 띄는
+  // 밝은 초록을 따로 쓴다 — "이건 확실히 싸다"는 게 목록에서 바로 보이도록.
+  var tier = avg < 30000 ? { c: '#0FA958', s: '#DEF7E7' }
     : avg < 70000 ? { c: 'var(--gold)', s: '#FBF2DC' }
     : avg < 150000 ? { c: '#C1650A', s: '#FBEAD9' }
     : { c: 'var(--wine)', s: 'var(--wine-soft)' };
