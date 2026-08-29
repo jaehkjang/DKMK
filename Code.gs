@@ -263,6 +263,84 @@ function requestFoodPairing_(wine) {
 }
 
 /**
+ * 일회성 정리 함수. Apps Script 편집기에서 함수 선택 → 이 함수 고르고 실행하면 된다
+ * (setup()/backfillKoreaPairing()과 같은 방식 — 앱에는 이 기능을 위한 버튼을 따로 안 만들었다).
+ *
+ * 스타일 차트(당도·산도·타닌·바디감) 컬럼은 새로 생긴 거라 기존 와인은 전부 비어
+ * 있다. 평소엔 상세를 열거나 "보유 와인 정보 한번에 채우기"를 눌러야 채워지는데,
+ * 마신 와인은 그 버튼 대상이 아니라서(비운 병에 서빙·페어링 정보를 다시 물어볼
+ * 필요가 없어서 일부러 뺐다) 마신 와인은 하나하나 열어봐야만 채워진다. 이 함수는
+ * 보유·마심 가리지 않고 스타일 네 값이 비어 있는 모든 와인에 한 번씩 돌아서 채운다
+ * (다른 필드는 안 건드리고 딱 이 네 개만 가볍게 물어봐서 AI 호출을 최소로 줄인다).
+ *
+ * 실행 로그(보기 → 실행 로그)에 몇 병을 채우고 실패했는지 남는다. 다시 실행해도
+ * 안전하다 — 이미 값이 있는 와인은 건너뛴다.
+ */
+function backfillWineStyle() {
+  var sheet = getSheet_();
+  var headers = getHeaders_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('와인이 없어요'); return; }
+
+  var col = {
+    이름: headers.indexOf('와인명'), 종류: headers.indexOf('종류'), 품종: headers.indexOf('품종'),
+    생산지: headers.indexOf('생산지/국가'), 빈티지: headers.indexOf('빈티지'),
+    당도: headers.indexOf('당도'), 산도: headers.indexOf('산도'),
+    타닌: headers.indexOf('타닌'), 바디감: headers.indexOf('바디감')
+  };
+  if (col.당도 === -1) { Logger.log('"당도" 컬럼이 없어요 — 먼저 setup()을 실행해주세요.'); return; }
+
+  var values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  var done = 0, skipped = 0, failed = 0;
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (row[col.당도] && row[col.산도] && row[col.타닌] && row[col.바디감]) { skipped++; continue; }
+
+    try {
+      var result = requestWineStyle_({
+        와인명: row[col.이름], 종류: row[col.종류], 품종: row[col.품종],
+        생산지: row[col.생산지], 빈티지: row[col.빈티지]
+      });
+      var r = i + 2;
+      // 요청 도중 다른 곳에서 값이 채워졌을 수 있으니 다시 읽어서 확인 후, 여전히
+      // 비어 있는 것만 쓴다 (suggestWineInfo와 같은 원칙).
+      var fresh = sheet.getRange(r, 1, 1, headers.length).getValues()[0];
+      if (!fresh[col.당도] && result['당도']) sheet.getRange(r, col.당도 + 1).setValue(result['당도']);
+      if (!fresh[col.산도] && result['산도']) sheet.getRange(r, col.산도 + 1).setValue(result['산도']);
+      if (!fresh[col.타닌] && result['타닌']) sheet.getRange(r, col.타닌 + 1).setValue(result['타닌']);
+      if (!fresh[col.바디감] && result['바디감']) sheet.getRange(r, col.바디감 + 1).setValue(result['바디감']);
+      done++;
+    } catch (e) {
+      failed++;
+      Logger.log('실패: ' + row[col.이름] + ' — ' + e.message);
+    }
+    Utilities.sleep(300); // 요청이 한꺼번에 몰리지 않게 살짝 간격을 둔다
+  }
+  Logger.log('완료: ' + done + '병 채움, ' + skipped + '병 건너뜀(이미 있었음), ' + failed + '병 실패');
+}
+
+/** backfillWineStyle 전용 — 스타일 네 값만 가볍게 물어본다. */
+function requestWineStyle_(wine) {
+  var prompt = '너는 소믈리에다. 아래 와인의 맛 스타일을 평가해라.\n' +
+    JSON.stringify(wine) + '\n\n' +
+    '"당도"/"산도"/"타닌"/"바디감"에 이 와인의 맛 스타일을 1~5 숫자로 매겨라(잘 모르는 와인이어도 종류·품종· ' +
+    '생산지로 미루어 그 스타일의 일반적인 특성을 추정해라 — 절대 빈 값으로 남기지 마라). ' +
+    '"당도"는 1=아주 드라이 ~ 5=아주 달콤, "산도"는 1=밋밋함 ~ 5=톡 쏘는 신맛, ' +
+    '"타닌"은 1=부드러움 ~ 5=떫음(화이트·로제·스파클링처럼 타닌이 거의 없는 와인은 1~2로 낮게), ' +
+    '"바디감"은 1=가벼움 ~ 5=묵직함으로 매겨라.\n\n' +
+    '아래 JSON으로만 답해라.\n' +
+    '{"당도":1~5, "산도":1~5, "타닌":1~5, "바디감":1~5}';
+  var result = callGemini_([{ text: prompt }]);
+  if (!result) throw new Error('스타일 평가를 만들지 못했어요');
+  return {
+    당도: parseInt(result['당도'], 10) || '',
+    산도: parseInt(result['산도'], 10) || '',
+    타닌: parseInt(result['타닌'], 10) || '',
+    바디감: parseInt(result['바디감'], 10) || ''
+  };
+}
+
+/**
  * 스프레드시트 가져오기.
  * SHEET_ID 속성이 있으면 그걸로 열고(따로 만든 프로젝트), 없으면 붙어 있는 시트를 쓴다.
  */
