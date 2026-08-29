@@ -88,7 +88,8 @@ function infoAskDue(w) {
 /** 상세/일괄채우기에서 "아직 비어 있는 정보가 있나" 판단 (같은 기준을 두 곳에서 쓴다) */
 function infoIncomplete(w) {
   return !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['베스트페어링'] ||
-    !w['품종'] || !w['생산지/국가'] || !w['와인배경'] || !w['평균가격(국내·원)'];
+    !w['품종'] || !w['생산지/국가'] || !w['와인배경'] || !w['평균가격(국내·원)'] ||
+    !w['당도'] || !w['산도'] || !w['타닌'] || !w['바디감'];
 }
 
 function starsHtml(n) {
@@ -603,6 +604,7 @@ function openDetail(r) {
     '<div class="line" style="margin-top:8px"><span class="tag" style="--c:' + t.c + ';--c-soft:' + t.s + '">' + esc(t.n) + '</span></div>' +
     photo +
     '<div class="facts" id="detailFacts">' + detailFactsHtml(w) + '</div>' +
+    '<div id="styleBox">' + styleChartHtml(w) + '</div>' +
     '<div id="servingBox">' + (servingFactsHtml(w) || (needSuggest ? '<div class="note" id="servingSuggest" style="margin-top:12px">🍷 부족한 정보 AI로 채우는 중…</div>' : '')) + '</div>' +
     '<div class="act-row" style="margin-top:14px">' +
     '<button class="act" onclick="shareWine(' + r + ')"><span class="ic">🔗</span>공유</button>' +
@@ -623,15 +625,43 @@ function openDetail(r) {
       ['품종', '생산지/국가', '서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점',
         '내잔추천', '내잔추천별점', '추천 페어링', '추천페어링별점',
         '베스트페어링', '베스트페어링별점',
-        '와인배경', '평균가격(국내·원)', '정보갱신일'].forEach(function (k) {
+        '와인배경', '평균가격(국내·원)', '정보갱신일',
+        '당도', '산도', '타닌', '바디감'].forEach(function (k) {
         if (res[k]) w[k] = res[k];
       });
       var factsEl = document.getElementById('detailFacts');
       if (factsEl) factsEl.innerHTML = detailFactsHtml(w);
+      var styleEl = document.getElementById('styleBox');
+      if (styleEl) styleEl.innerHTML = styleChartHtml(w);
       var servingEl = document.getElementById('servingBox');
       if (servingEl) servingEl.innerHTML = servingFactsHtml(w);
     });
   }
+}
+
+/**
+ * 당도·산도·타닌·바디감(각 1~5)을 막대로 보여주는 와인 스타일 차트.
+ * 기록 탭 통계와 같은 막대 스타일(.bar-row/.bar-wrap/.bar)을 그대로 재사용한다 —
+ * 이 앱 전체가 하나의 막대 그래프 표현을 쓰도록 통일해서, 새 UI 패턴을 안 늘린다.
+ * 넷 다 아직 안 채워졌으면(AI가 아직 안 다녀갔으면) 빈 문자열을 돌려준다.
+ */
+function styleChartHtml(w) {
+  var dims = [
+    ['당도', w['당도'], '드라이', '스위트'],
+    ['산도', w['산도'], '밋밋함', '신맛강함'],
+    ['타닌', w['타닌'], '부드러움', '떫음'],
+    ['바디감', w['바디감'], '가벼움', '묵직함']
+  ];
+  var rows = dims.filter(function (d) { return d[1]; });
+  if (!rows.length) return '';
+  return '<div class="sect" style="margin:20px 0 6px">🍇 와인 스타일</div>' +
+    rows.map(function (d) {
+      var v = parseInt(d[1], 10) || 0;
+      return '<div class="bar-row"><div class="k">' + d[0] +
+        ' <span class="style-range">(' + d[2] + ' ↔ ' + d[3] + ')</span></div>' +
+        '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:var(--wine);width:' + (v / 5 * 100) + '%"></div></div>' +
+        '<div class="n">' + v + '/5</div></div></div>';
+    }).join('');
 }
 
 /** 상세 상단의 기본 정보(품종·생산지·빈티지·가격 등) 칸 */
