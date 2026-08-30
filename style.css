@@ -30,7 +30,10 @@
 
     /* ---------- 잠금 화면 ---------- */
     #pinScreen {
-    position:fixed; inset:0; z-index:60; background:var(--wine);
+    /* inset 대신 top/right/bottom/left를 각각 쓴다 — 구형 안드로이드 웹뷰(카카오톡 등
+       인앱 브라우저에 많음)는 inset 축약형을 못 알아들어서 화면을 꽉 채우지 못하고
+       왼쪽 위로 쏠려 보이는 문제가 있었다. */
+    position:fixed; top:0; right:0; bottom:0; left:0; z-index:60; background:var(--wine);
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px;
     color:#fff;
     }
@@ -189,7 +192,7 @@
     .pick.dup { opacity:.55; }
 
     /* ---------- 모달 ---------- */
-    .modal-bg { position:fixed; inset:0; background:rgba(46,42,38,.45); display:none; align-items:flex-end; z-index:50; }
+    .modal-bg { position:fixed; top:0; right:0; bottom:0; left:0; background:rgba(46,42,38,.45); display:none; align-items:flex-end; z-index:50; }
     .modal-bg.on { display:flex; }
     .modal {
     background:var(--bg); width:100%; max-width:480px; margin:0 auto;

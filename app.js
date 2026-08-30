@@ -664,6 +664,14 @@ function styleChartHtml(w) {
     }).join('');
 }
 
+/** "38000"처럼 숫자만 입력했으면 "38,000원"으로 보기 좋게 바꾼다. 이미 단위나
+ * 다른 글자가 섞여 있으면(예: "38000원 세일가") 손대지 않고 입력한 그대로 보여준다. */
+function fmtWonIfNumeric(v) {
+  var s = String(v || '').trim();
+  if (!s) return '';
+  return /^[\d,]+$/.test(s) ? Number(s.replace(/,/g, '')).toLocaleString('ko-KR') + '원' : s;
+}
+
 /** 상세 상단의 기본 정보(품종·생산지·빈티지·가격 등) 칸 */
 function detailFactsHtml(w) {
   // AI가 채워주는 서빙온도/완벽한잔이 이미 있으면 옛날 방식 수동 입력 필드(어울리는잔/서빙방법)는
@@ -676,6 +684,8 @@ function detailFactsHtml(w) {
     ['💰 가격', w['평균가격(국내·원)']],
     ['🥂 잔', hasAiServing ? '' : w['어울리는잔']],
     ['🌡 서빙', hasAiServing ? '' : w['서빙방법']],
+    ['🛒 구매처', w['구매처']],
+    ['💵 구매 가격', fmtWonIfNumeric(w['구매가격'])],
     ['📖 배경', w['와인배경']],
     ['📝 메모', w['메모']]
   ];
@@ -781,7 +791,7 @@ function startEdit(r) {
   EDIT_ROW = r;
   cm('detailModal');
 
-  var fields = ['와인명', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)', '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모'];
+  var fields = ['와인명', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)', '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모', '구매처', '구매가격'];
   fields.forEach(function (f) {
     var el = document.getElementById('f_' + f);
     if (el) el.value = w[f] || '';
@@ -1158,7 +1168,7 @@ function checkSimilar() {
 /* ---------- 추가 / 수정 저장 ---------- */
 function submitAdd(e) {
   e.preventDefault();
-  var fields = ['와인명', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)', '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모'];
+  var fields = ['와인명', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)', '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모', '구매처', '구매가격'];
   var data = { '종류': SELECTED_TYPE };
   fields.forEach(function (f) {
     var el = document.getElementById('f_' + f);
