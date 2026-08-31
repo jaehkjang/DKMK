@@ -61,28 +61,21 @@
 
     <!-- 페어링 추천 -->
     <div id="pgFood" class="page">
-      <div class="seg" id="foodSeg">
-        <div class="on" data-fs="food" onclick="setFoodSeg('food')">음식부터 고르기</div>
-        <div data-fs="top" onclick="setFoodSeg('top')">⭐ 5점 페어링</div>
+      <div class="sect" style="margin-top:0">🍽 음식부터 고르기</div>
+      <div class="field big">
+        <input id="foodInput" placeholder="아래에서 골라보세요 (여러 개도 가능)" readonly>
       </div>
+      <div class="chips" id="foodQuick"></div>
+      <div class="chips sub" id="foodSub"></div>
+      <div id="foodCellarLabel" style="display:none;font-size:13px;font-weight:800;color:var(--sub);margin:6px 0 8px">🍷 우리 셀러 와인에 적힌 페어링</div>
+      <div class="chips" id="foodCellarChips"></div>
+      <button class="primary-btn" onclick="doRecommend()">어울리는 와인 찾기</button>
+      <button type="button" class="primary-btn alt" onclick="doRecommendNoFood()">안주없이 마실 와인 추천받기</button>
+      <div id="foodArea" style="margin-top:18px;"></div>
 
-      <div id="foodPickerSection">
-        <div class="field big">
-          <input id="foodInput" placeholder="아래에서 골라보세요 (여러 개도 가능)" readonly>
-        </div>
-        <div class="chips" id="foodQuick"></div>
-        <div class="chips sub" id="foodSub"></div>
-        <div id="foodCellarLabel" style="display:none;font-size:13px;font-weight:800;color:var(--sub);margin:6px 0 8px">🍷 우리 셀러 와인에 적힌 페어링</div>
-        <div class="chips" id="foodCellarChips"></div>
-        <button class="primary-btn" onclick="doRecommend()">어울리는 와인 찾기</button>
-        <button type="button" class="primary-btn alt" onclick="doRecommendNoFood()">안주없이 마실 와인 추천받기</button>
-        <div id="foodArea" style="margin-top:18px;"></div>
-      </div>
-
-      <div id="foodTopSection" style="display:none">
-        <div class="note" style="margin-bottom:12px">보유 와인 중 페어링 별점이 5점 만점인 것만 모았어요.</div>
-        <div id="foodTopArea"><div class="loading">불러오는 중…</div></div>
-      </div>
+      <div class="sect">⭐ 5점 페어링</div>
+      <div class="note" style="margin-bottom:12px">보유 와인 중 페어링 별점이 5점 만점인 것만 모았어요.</div>
+      <div id="foodTopArea"><div class="loading">불러오는 중…</div></div>
     </div>
 
     <!-- 추가 -->
