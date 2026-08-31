@@ -48,7 +48,8 @@ var FOOD_MENU = [
     { label: '스페인', children: ['하몽', '타파스', '빠에야', '감바스'] }
   ] },
   { label: '아시안음식', children: ['팟타이', '똠얌꿍', '반미', '나시고랭', '그린커리'] },
-  { label: '중동음식', children: ['후무스', '케밥', '샤와르마', '팔라펠'] }
+  { label: '중동음식', children: ['후무스', '케밥', '샤와르마', '팔라펠'] },
+  { label: '멕시칸', children: ['타코', '브리또', '화이타'] }
 ];
 var OPEN_PATH = [];
 var SELECTED_FOODS = [];
