@@ -34,12 +34,12 @@ function typeStyle(t) {
  */
 var FOOD_MENU = [
   { label: '한식', children: [
-    '삼겹살', '족발', '보쌈', '갈비찜', '찜닭', '감자탕', '삼계탕', '육개장', '설렁탕',
-    '후라이드치킨', '양념치킨', '간장치킨', '마늘치킨', '핫윙', '순살치킨',
-    '떡볶이', '순대', '튀김', '김밥', '오뎅', '라면'
+    '삼겹살', '족발', '보쌈', '갈비찜', '찜닭',
+    '후라이드치킨', '양념치킨', '간장치킨', '마늘치킨', '핫윙',
+    '순대', '튀김', '오뎅'
   ] },
-  { label: '중식', children: ['짜장면', '짬뽕', '탕수육', '마파두부', '깐풍기', '양장피'] },
-  { label: '일식', children: ['초밥', '회', '숙성회', '라멘', '우동', '돈카츠', '야키토리', '규동'] },
+  { label: '중식', children: ['짜장면', '짬뽕', '탕수육', '마파두부', '깐풍기', '양장피', '라조기', '가지볶음', '어향육슬'] },
+  { label: '일식', children: ['초밥', '숙성회', '돈카츠', '야키토리'] },
   { label: '양식', children: [
     { label: '이탈리안', children: ['토마토파스타', '오일파스타', '크림파스타', '로제파스타', '봉골레파스타', '해산물파스타', '버섯파스타', '미트소스파스타', '피자', '리조또', '파르미지아노'] },
     { label: '미국', children: ['스테이크', '햄버거', '치즈버거', '불고기버거', '베이컨버거', '더블패티버거', '바비큐립', '체다치즈', '고다치즈'] },
@@ -47,11 +47,13 @@ var FOOD_MENU = [
     { label: '독일', children: ['학센', '소시지', '슈니첼', '자우어크라우트'] },
     { label: '스페인', children: ['하몽', '타파스', '빠에야', '감바스'] }
   ] },
-  { label: '아시안음식', children: ['팟타이', '똠얌꿍', '쌀국수', '반미', '나시고랭', '그린커리'] },
+  { label: '아시안음식', children: ['팟타이', '똠얌꿍', '반미', '나시고랭', '그린커리'] },
   { label: '중동음식', children: ['후무스', '케밥', '샤와르마', '팔라펠'] }
 ];
 var OPEN_PATH = [];
 var SELECTED_FOODS = [];
+/** 페어링 추천 페이지 안의 두 탭 — 'food'(음식부터 고르기) / 'top'(셀러 5점 페어링) */
+var FOOD_SEG = 'food';
 
 /* ---------- 헬퍼 ---------- */
 function om(id) { document.getElementById(id).classList.add('on'); }
@@ -478,8 +480,58 @@ function showPage(p) {
   // 바뀌는 동작(추가/수정/삭제/마시기 등)은 각자 끝나고 load()를 다시 부른다.
   if (p === 'Cellar') { if (WINES_LOADED) renderList(); else load(); }
   if (p === 'Stat') loadStats();
-  if (p === 'Food') renderCellarPairingChips();
+  if (p === 'Food') {
+    renderCellarPairingChips();
+    if (FOOD_SEG === 'top') renderTopPairings();
+  }
   window.scrollTo(0, 0);
+}
+
+/** 페어링 추천 페이지의 "음식부터 고르기" ↔ "5점 페어링" 탭 전환 */
+function setFoodSeg(v) {
+  FOOD_SEG = v;
+  document.querySelectorAll('#foodSeg > div').forEach(function (d) { d.classList.toggle('on', d.dataset.fs === v); });
+  document.getElementById('foodPickerSection').style.display = v === 'food' ? '' : 'none';
+  document.getElementById('foodTopSection').style.display = v === 'top' ? '' : 'none';
+  if (v === 'top') renderTopPairings();
+}
+
+/**
+ * 보유 와인 중, 클래식 페어링이나 제안 페어링 별점이 5점 만점인 것만 골라낸다.
+ * AI를 다시 부르지 않고 이미 셀러에 적혀 있는 페어링 정보를 그대로 훑는 것이라
+ * (getWines로 받아둔 캐시만 쓴다) 즉시 뜬다.
+ */
+function cellarTopPairings() {
+  return ALL_WINES.filter(function (w) { return w['상태'] === '보유'; })
+    .map(function (w) {
+      var hits = [];
+      if (w['베스트페어링'] && parseInt(w['베스트페어링별점'], 10) === 5) hits.push(['🍽 클래식 페어링', w['베스트페어링']]);
+      if (w['추천 페어링'] && parseInt(w['추천페어링별점'], 10) === 5) hits.push(['🍽 제안 페어링', w['추천 페어링']]);
+      return { wine: w, hits: hits };
+    })
+    .filter(function (x) { return x.hits.length; });
+}
+
+function renderTopPairings() {
+  var area = document.getElementById('foodTopArea');
+  if (!WINES_LOADED) {
+    area.innerHTML = '<div class="loading">불러오는 중…</div>';
+    callAPI(function () { return API.getWines(); }).then(function (d) {
+      if (!d || d.error) { area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(d && d.error) + '</div>'; return; }
+      ALL_WINES = d.wines; WINES_LOADED = true;
+      renderTopPairings();
+    });
+    return;
+  }
+  var list = cellarTopPairings();
+  area.innerHTML = list.length
+    ? list.map(function (x) {
+        var reason = '<div class="reason">' + x.hits.map(function (h) {
+          return h[0] + ': ' + esc(h[1]) + ' ' + starsHtml(5);
+        }).join('<br>') + '</div>';
+        return cardHtml(x.wine, reason);
+      }).join('')
+    : '<div class="empty"><span class="big">🤔</span>아직 별점 5점짜리<br>페어링이 없어요</div>';
 }
 
 function load() {
@@ -495,13 +547,13 @@ function load() {
 /* ---------- 목록 ---------- */
 function setSeg(v) {
   SEG = v;
-  document.querySelectorAll('.seg div').forEach(function (d) { d.classList.toggle('on', d.dataset.s === v); });
+  document.querySelectorAll('#cellarSeg > div').forEach(function (d) { d.classList.toggle('on', d.dataset.s === v); });
   renderList();
 }
 /** 와인을 담은 직후엔 '마신 와인'이 아니라 방금 담은 게 보이는 보유 칸으로 */
 function goCellarSeg(seg) {
   SEG = seg;
-  document.querySelectorAll('.seg div').forEach(function (d) { d.classList.toggle('on', d.dataset.s === seg); });
+  document.querySelectorAll('#cellarSeg > div').forEach(function (d) { d.classList.toggle('on', d.dataset.s === seg); });
   showPage('Cellar');
 }
 function goCellarOwned() { goCellarSeg('보유'); }
