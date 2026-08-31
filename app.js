@@ -53,8 +53,6 @@ var FOOD_MENU = [
 ];
 var OPEN_PATH = [];
 var SELECTED_FOODS = [];
-/** 페어링 추천 페이지 안의 두 탭 — 'food'(음식부터 고르기) / 'top'(셀러 5점 페어링) */
-var FOOD_SEG = 'food';
 
 /* ---------- 헬퍼 ---------- */
 function om(id) { document.getElementById(id).classList.add('on'); }
@@ -483,18 +481,9 @@ function showPage(p) {
   if (p === 'Stat') loadStats();
   if (p === 'Food') {
     renderCellarPairingChips();
-    if (FOOD_SEG === 'top') renderTopPairings();
+    renderTopPairings();
   }
   window.scrollTo(0, 0);
-}
-
-/** 페어링 추천 페이지의 "음식부터 고르기" ↔ "5점 페어링" 탭 전환 */
-function setFoodSeg(v) {
-  FOOD_SEG = v;
-  document.querySelectorAll('#foodSeg > div').forEach(function (d) { d.classList.toggle('on', d.dataset.fs === v); });
-  document.getElementById('foodPickerSection').style.display = v === 'food' ? '' : 'none';
-  document.getElementById('foodTopSection').style.display = v === 'top' ? '' : 'none';
-  if (v === 'top') renderTopPairings();
 }
 
 /**
