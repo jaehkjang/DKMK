@@ -561,10 +561,34 @@ function priceBadge(w) {
   return '<span class="tag" style="--c:' + tier.c + ';--c-soft:' + tier.s + '">' + text + '</span>';
 }
 
+/** 생산지/국가 텍스트(자유 서술이라 형식이 다양함)에서 국가 이름을 찾아 국기 이모지로.
+ * 못 찾으면 빈 문자열 — 국가 표기가 없거나 목록에 없는 나라면 그냥 텍스트만 보여준다. */
+var COUNTRY_FLAGS = [
+  ['프랑스', '🇫🇷'], ['이탈리아', '🇮🇹'], ['스페인', '🇪🇸'], ['포르투갈', '🇵🇹'],
+  ['독일', '🇩🇪'], ['오스트리아', '🇦🇹'], ['헝가리', '🇭🇺'], ['그리스', '🇬🇷'],
+  ['조지아', '🇬🇪'], ['스위스', '🇨🇭'], ['불가리아', '🇧🇬'], ['루마니아', '🇷🇴'],
+  ['크로아티아', '🇭🇷'], ['슬로베니아', '🇸🇮'], ['영국', '🇬🇧'],
+  ['미국', '🇺🇸'], ['캐나다', '🇨🇦'], ['멕시코', '🇲🇽'],
+  ['칠레', '🇨🇱'], ['아르헨티나', '🇦🇷'], ['브라질', '🇧🇷'], ['우루과이', '🇺🇾'],
+  ['오스트레일리아', '🇦🇺'], ['호주', '🇦🇺'], ['뉴질랜드', '🇳🇿'],
+  ['남아프리카공화국', '🇿🇦'], ['남아공', '🇿🇦'],
+  ['일본', '🇯🇵'], ['중국', '🇨🇳'], ['대한민국', '🇰🇷'], ['한국', '🇰🇷'],
+  ['이스라엘', '🇮🇱'], ['레바논', '🇱🇧'], ['튀르키예', '🇹🇷'], ['터키', '🇹🇷']
+];
+function countryFlag(w) {
+  var s = String(w['생산지/국가'] || '');
+  for (var i = 0; i < COUNTRY_FLAGS.length; i++) {
+    if (s.indexOf(COUNTRY_FLAGS[i][0]) !== -1) return COUNTRY_FLAGS[i][1];
+  }
+  return '';
+}
+
 function cardHtml(w, extraHtml) {
   var isDrunk = w['상태'] === '마심';
   var t = typeStyle(w['종류']);
-  var bits = [w['빈티지'], (w['생산지/국가'] || '').split('/').pop()].filter(Boolean);
+  var flag = countryFlag(w);
+  var countryText = (w['생산지/국가'] || '').split('/').pop();
+  var bits = [w['빈티지'], countryText ? (flag ? flag + ' ' + countryText : countryText) : ''].filter(Boolean);
   var sub = bits.length ? '<span class="dot">' + esc(bits.join(' · ')) + '</span>' : '';
   var grape = w['품종'] ? '<span class="dot">' + esc(String(w['품종']).split(/[·,]/)[0]) + '</span>' : '';
   var price = priceBadge(w);
