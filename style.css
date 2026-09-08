@@ -147,8 +147,6 @@
     .match-badge { display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:800; color:var(--ok); background:#E7F2E9; padding:3px 9px; border-radius:20px; margin-top:8px; }
 
     .more-toggle { width:100%; text-align:center; padding:12px; color:var(--sub); font-size:13.5px; font-weight:700; background:none; border:none; }
-    #moreFields { display:none; }
-    #moreFields.on { display:block; }
 
     .primary-btn {
     width:100%; padding:16px; border:none; border-radius:14px;

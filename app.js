@@ -857,7 +857,7 @@ function startEdit(r) {
   EDIT_ROW = r;
   cm('detailModal');
 
-  var fields = ['와인명', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)', '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모', '구매처', '구매가격'];
+  var fields = ['와인명', '품종', '빈티지', '생산지/국가', '메모', '구매처', '구매가격'];
   fields.forEach(function (f) {
     var el = document.getElementById('f_' + f);
     if (el) el.value = w[f] || '';
@@ -865,8 +865,6 @@ function startEdit(r) {
   SELECTED_TYPE = typeStyle(w['종류']).n;
   document.querySelectorAll('#typeChips button').forEach(function (x) { x.classList.toggle('on', x.dataset.t === SELECTED_TYPE); });
 
-  document.getElementById('moreFields').classList.add('on');
-  document.getElementById('moreLabel').textContent = '− 접기';
   document.getElementById('similarHint').innerHTML = '';
   PHOTO_DATAURL = null; PHOTO_UPLOADED_URL = null;
   document.getElementById('photoPreview').innerHTML = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '">' : '';
@@ -1076,12 +1074,6 @@ function renderCellarPairingChips() {
     b.onclick = function () { toggleFoodSelection(b.textContent); };
   });
 }
-function toggleMore() {
-  var m = document.getElementById('moreFields');
-  m.classList.toggle('on');
-  document.getElementById('moreLabel').textContent = m.classList.contains('on') ? '− 접기' : '＋ 자세히 입력';
-}
-
 /* ---------- 사진 ----------
  * 폰 카메라 원본은 보통 몇 MB나 돼서, 그대로 보내면 AI 인식(recognizeLabel)과
  * 저장(addWine)에 매번 그 큰 용량을 두 번 실어 날라야 해서 느리다. 캔버스로
@@ -1234,7 +1226,7 @@ function checkSimilar() {
 /* ---------- 추가 / 수정 저장 ---------- */
 function submitAdd(e) {
   e.preventDefault();
-  var fields = ['와인명', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)', '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모', '구매처', '구매가격'];
+  var fields = ['와인명', '품종', '빈티지', '생산지/국가', '메모', '구매처', '구매가격'];
   var data = { '종류': SELECTED_TYPE };
   fields.forEach(function (f) {
     var el = document.getElementById('f_' + f);
