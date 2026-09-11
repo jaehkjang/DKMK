@@ -26,32 +26,21 @@ function typeStyle(t) {
 }
 
 /**
- * 음식 빠른 선택. 대분류(요리 문화권)로 나누고, 그 아래 세부 음식을 펼친다.
- * "양식"처럼 나라별로 더 나뉘는 대분류는 children 안에 또 {label, children}을 넣어
- * 한 단계 더 펼칠 수 있다(문자열이면 바로 고를 수 있는 음식, 객체면 더 펼쳐야 하는
- * 하위 분류). 칩은 여러 개 골라도 되는 다중 선택이라(SELECTED_FOODS), 오늘 먹는
- * 음식이 여럿이면 다 같이 어울리는 와인을 찾아준다.
+ * 음식 빠른 선택. 카테고리(요리 문화권) 탭 하나를 고르면 그 아래 구체적인 메뉴들이
+ * 바로 펼쳐지는 1단 구조 — 예전처럼 "양식 → 이탈리안 → ..." 식으로 여러 번 펼쳐야
+ * 하는 깊은 메뉴가 아니라, 대표 메뉴만 추려서 한 번에 고를 수 있게 했다.
+ * 칩은 여러 개 골라도 되는 다중 선택이라(SELECTED_FOODS), 오늘 먹는 음식이
+ * 여럿이면 다 같이 어울리는 와인을 찾아준다.
  */
 var FOOD_MENU = [
-  { label: '한식', children: [
-    '삼겹살', '족발', '보쌈', '갈비찜', '찜닭',
-    '후라이드치킨', '양념치킨', '간장치킨', '마늘치킨', '핫윙',
-    '순대', '튀김', '오뎅', '닭발', '부대찌개', '제육볶음'
-  ] },
-  { label: '중식', children: ['짜장면', '짬뽕', '탕수육', '마파두부', '깐풍기', '양장피', '라조기', '가지볶음', '어향육슬', '군만두', '딤섬'] },
-  { label: '일식', children: ['초밥', '숙성회', '돈카츠', '야키토리'] },
-  { label: '양식', children: [
-    { label: '이탈리안', children: ['토마토파스타', '오일파스타', '크림파스타', '로제파스타', '봉골레파스타', '해산물파스타', '버섯파스타', '미트소스파스타', '피자', '리조또', '파르미지아노'] },
-    { label: '미국', children: ['스테이크', '햄버거', '치즈버거', '불고기버거', '베이컨버거', '더블패티버거', '바비큐립', '체다치즈', '고다치즈'] },
-    { label: '프랑스', children: ['코코뱅', '부야베스', '에스카르고', '브리치즈', '까망베르', '블루치즈'] },
-    { label: '독일', children: ['학센', '소시지', '슈니첼', '자우어크라우트'] },
-    { label: '스페인', children: ['하몽', '타파스', '빠에야', '감바스'] }
-  ] },
-  { label: '아시안음식', children: ['팟타이', '똠얌꿍', '반미', '나시고랭', '그린커리', '카오팟'] },
-  { label: '중동음식', children: ['후무스', '케밥', '샤와르마', '팔라펠'] },
-  { label: '멕시칸', children: ['타코', '브리또', '화이타'] }
+  { label: '한식', icon: '🍚', children: ['육전', '호박전', '된장찌개', '삼겹살', '보쌈', '족발'] },
+  { label: '중식', icon: '🥢', children: ['탕수육', '양장피', '라조기', '지삼선', '향라육슬', '어향육슬', '어향가지', '깐풍기'] },
+  { label: '일식', icon: '🍣', children: ['숙성회'] },
+  { label: '이탈리안', icon: '🍝', children: ['페페로니피자', '미트피자', '오일파스타', '토마토해산물파스타', '명란파스타', '라구파스타'] },
+  { label: '아시안', icon: '🍛', children: ['카오팟무', '타코', '부리또', '화이타(새우)', '화이타(돼지고기)', '화이타(소고기)'] },
+  { label: '스테이크', icon: '🥩', children: ['등심', '안심', '채끝살'] }
 ];
-var OPEN_PATH = [];
+var ACTIVE_FOOD_CAT = FOOD_MENU[0].label;
 var SELECTED_FOODS = [];
 
 /* ---------- 헬퍼 ---------- */
@@ -1009,63 +998,56 @@ function renderTypeChips() {
   });
 }
 /**
- * 음식 칩은 여러 개 골라도 되는 다중 선택이다. 고를 때마다 선택된 것들을
- * "·"로 이어 입력창에 채우고 바로 검색한다. 다시 누르면 선택 해제.
+ * 음식 칩은 여러 개 골라도 되는 다중 선택이다(SELECTED_FOODS). 다시 누르면 선택 해제.
+ * 음식을 하나라도 고른 상태면 바로 추천을 다시 부르고, 마지막 하나를 해제하면
+ * 결과 영역을 비운다 — 매번 "찾기" 버튼을 새로 누르지 않아도 즉시 반영된다.
  */
 function toggleFoodSelection(label) {
   var i = SELECTED_FOODS.indexOf(label);
   if (i === -1) SELECTED_FOODS.push(label); else SELECTED_FOODS.splice(i, 1);
-  document.getElementById('foodInput').value = SELECTED_FOODS.join('·');
   renderQuickFoods();
   renderCellarPairingChips();
   if (SELECTED_FOODS.length) doRecommend();
   else document.getElementById('foodArea').innerHTML = '';
 }
 
+/**
+ * 카테고리 탭(한식/중식/…) 한 줄 + 고른 카테고리의 메뉴 칩 한 줄, 그 아래
+ * 지금까지 고른 음식을 모아 보여주는 요약 칩까지 — 세 블록을 한 번에 그린다.
+ */
 function renderQuickFoods() {
-  var el = document.getElementById('foodQuick');
-  el.innerHTML = FOOD_MENU.map(function (item) {
-    var isOpen = OPEN_PATH[0] === item.label;
-    var arrow = isOpen ? ' ▲' : ' ▼';
-    return '<button type="button" class="' + (isOpen ? 'on' : '') + '" data-cat="' + esc(item.label) + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(item.label) + arrow + '</button>';
+  var cats = document.getElementById('foodCats');
+  cats.innerHTML = FOOD_MENU.map(function (item) {
+    var isOn = ACTIVE_FOOD_CAT === item.label;
+    return '<button type="button" class="' + (isOn ? 'on' : '') + '" data-cat="' + esc(item.label) + '">' + esc(item.icon || '') + ' ' + esc(item.label) + '</button>';
   }).join('');
-  el.querySelectorAll('button').forEach(function (b) {
-    b.onclick = function () {
-      var label = b.dataset.cat;
-      OPEN_PATH = (OPEN_PATH[0] === label) ? [] : [label];
-      renderQuickFoods();
-    };
+  cats.querySelectorAll('button').forEach(function (b) {
+    b.onclick = function () { ACTIVE_FOOD_CAT = b.dataset.cat; renderQuickFoods(); };
   });
 
-  var sub = document.getElementById('foodSub');
-  // 열려 있는 경로를 따라가며 지금 보여줄 하위 목록을 찾는다.
-  var list = FOOD_MENU;
-  for (var i = 0; i < OPEN_PATH.length; i++) {
-    var found = list.filter(function (c) { return typeof c === 'object' && c.label === OPEN_PATH[i]; })[0];
-    if (!found) { list = null; break; }
-    list = found.children;
-  }
-  if (!list) { sub.innerHTML = ''; return; }
-
-  var backBtn = OPEN_PATH.length > 1
-    ? '<button type="button" data-back="1" style="--c:var(--sub);--c-soft:var(--line)">← 뒤로</button>' : '';
-  sub.innerHTML = backBtn + list.map(function (c) {
-    var isObj = typeof c === 'object';
-    var label = isObj ? c.label : c;
-    var isOpen = isObj && OPEN_PATH[OPEN_PATH.length - 1] === label && OPEN_PATH.length > 1;
-    var isSelected = !isObj && SELECTED_FOODS.indexOf(label) !== -1;
-    var arrow = isObj ? (isOpen ? ' ▲' : ' ▼') : '';
-    return '<button type="button" class="' + (isOpen || isSelected ? 'on' : '') + '" data-sub="' + esc(label) + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(label) + arrow + '</button>';
+  var dishes = document.getElementById('foodDishes');
+  var cat = FOOD_MENU.filter(function (c) { return c.label === ACTIVE_FOOD_CAT; })[0];
+  var list = cat ? cat.children : [];
+  dishes.innerHTML = list.map(function (label) {
+    var isSelected = SELECTED_FOODS.indexOf(label) !== -1;
+    return '<button type="button" class="' + (isSelected ? 'on' : '') + '" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(label) + '</button>';
   }).join('');
-  var backEl = sub.querySelector('[data-back]');
-  if (backEl) backEl.onclick = function () { OPEN_PATH = [OPEN_PATH[0]]; renderQuickFoods(); };
-  sub.querySelectorAll('[data-sub]').forEach(function (b) {
-    var label = b.dataset.sub;
-    var node = list.filter(function (c) { return typeof c === 'object' && c.label === label; })[0];
-    b.onclick = function () {
-      if (node) { OPEN_PATH = [OPEN_PATH[0], label]; renderQuickFoods(); }
-      else toggleFoodSelection(label);
-    };
+  dishes.querySelectorAll('button').forEach(function (b) {
+    b.onclick = function () { toggleFoodSelection(b.textContent); };
+  });
+
+  renderSelectedFoodChips();
+}
+
+/** 카테고리를 옮겨도 지금까지 고른 음식이 안 보이지 않도록 별도 요약 줄로 항상 보여준다. */
+function renderSelectedFoodChips() {
+  var el = document.getElementById('foodSelectedChips');
+  if (!el) return;
+  el.innerHTML = SELECTED_FOODS.map(function (label) {
+    return '<button type="button" class="on" style="--c:var(--wine);--c-soft:var(--wine-soft)">' + esc(label) + ' <span class="x">✕</span></button>';
+  }).join('');
+  el.querySelectorAll('button').forEach(function (b, i) {
+    b.onclick = function () { toggleFoodSelection(SELECTED_FOODS[i]); };
   });
 }
 
@@ -1296,20 +1278,20 @@ function submitAdd(e) {
 function doRecommend() {
   var food = SELECTED_FOODS.join('·');
   if (!food) { toast('먼저 음식을 골라주세요'); return; }
-  runRecommend(food);
+  runRecommend(food, 'foodArea');
 }
 
-/** 안주 없이 그냥 오늘 마시기 좋은 와인 추천 */
+/**
+ * 안주 없이 그냥 오늘 마시기 좋은 와인 추천 — 이제 음식 고르기와는 별개의 카드라서
+ * 결과를 그 카드 전용 영역(noFoodArea)에 따로 보여주고, 위에서 고르고 있던 음식
+ * 선택은 건드리지 않는다.
+ */
 function doRecommendNoFood() {
-  document.getElementById('foodInput').value = '';
-  SELECTED_FOODS = [];
-  renderQuickFoods();
-  renderCellarPairingChips();
-  runRecommend('');
+  runRecommend('', 'noFoodArea');
 }
 
-function runRecommend(food) {
-  var area = document.getElementById('foodArea');
+function runRecommend(food, areaId) {
+  var area = document.getElementById(areaId);
   area.innerHTML = '<div class="loading">🍷 고르는 중…</div>';
   callAPI(function () { return API.recommendByFood(food); }).then(function (res) {
     if (!res || res.error) {
