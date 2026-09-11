@@ -83,6 +83,7 @@ function dispatch_(action, p) {
     case 'recognizeLabel':   return recognizeLabel(token, p.photo);
     case 'recognizeCellar':  return recognizeCellar(token, p.photo);
     case 'recommendByFood':  return recommendByFood(token, p.food);
+    case 'recommendFoodRequired': return recommendFoodRequired(token);
     case 'getAdminOverview': return getAdminOverview(token);
     case 'deleteUserAccount': return deleteUserAccount(token, p.id);
     case 'getGlasses':       return getGlasses(token);
@@ -1454,6 +1455,81 @@ function recommendByFood(token, food) {
     }),
     style: ''
   };
+}
+
+/**
+ * 보유 와인 중 "음식 페어링이 사실상 필수적인" 스타일만 골라준다 —
+ * recommendByFood(food='')가 추천하는 "안주 없이 마셔도 좋은 와인"의 반대 목록.
+ * 고산도/고탄닌의 거친 레드(바롤로·키안티 클라시코 등), 초산도/초건조 화이트(무스카데·
+ * 고산도 샤블리 등)처럼 자극이 강해 음식의 지방·감칠맛이 그 자극을 눌러줘야 편하게
+ * 마실 수 있는 스타일을 우선 고른다. 셀러 구성이 그대로면(cellarSignature_) 캐시를
+ * 쓰고, 바뀌면 다시 AI에 물어본다(recommendByFood의 캐시 방식과 동일).
+ * 반환: { picks: [{ wine, reason, 별점 }] }
+ */
+var FOOD_REQUIRED_CACHE_KEY = '__FOOD_REQUIRED__';
+function recommendFoodRequired(token) {
+  var me = String(requireUser_(token)['아이디']);
+  var all = getWines(token).wines;
+  var owned = all.filter(function (w) { return w['상태'] === '보유'; });
+  if (!owned.length) return { picks: [] };
+
+  var sig = cellarSignature_(owned);
+  var cached = getPairingCache_(me, FOOD_REQUIRED_CACHE_KEY);
+  if (cached && cached.sig === sig) {
+    var ownedById = {};
+    owned.forEach(function (w) { ownedById[w.rowIndex] = w; });
+    var picks = (cached.picks || [])
+      .filter(function (p) { return ownedById[p.id]; })
+      .map(function (p) { return { wine: ownedById[p.id], reason: p.reason, '별점': p['별점'] }; });
+    return { picks: picks };
+  }
+
+  var menu = owned.map(function (w) {
+    return {
+      id: w.rowIndex,
+      이름: w['와인명'],
+      종류: w['종류'],
+      품종: w['품종'],
+      생산지: w['생산지/국가'],
+      기존페어링: w['추천 페어링'] || '',
+      베스트페어링: w['베스트페어링'] || ''
+    };
+  });
+
+  var out = [];
+  try {
+    var prompt = '너는 소믈리에다. 아래는 우리 집 와인 셀러에 지금 있는 와인 목록이다.\n' +
+      JSON.stringify(menu) + '\n\n' +
+      '이 중에서 음식과 함께 마셔야 비로소 밸런스가 맞는, 즉 음식 페어링이 사실상 필수적인 스타일의 와인만 골라라. ' +
+      '예를 들면 이탈리아 바롤로·키안티 클라시코처럼 산도·탄닌이 거친 레드, 무스카데나 산도가 아주 높은 샤블리처럼 초산도/초건조 화이트처럼 ' +
+      '자극이 강해서 음식의 지방·감칠맛·단맛이 그 자극을 눌러줘야 편하게 마실 수 있는 스타일을 우선해라. ' +
+      '반대로 과실향이 풍부하고 산도·당도가 완만해서 음식 없이도 그 자체로 편하게 마실 수 있는 스타일(손님 맞이용/단독 시음용 와인)은 여기서 제외해라. ' +
+      '해당하는 와인이 하나도 없으면 억지로 채우지 말고 "추천"을 빈 배열로 남겨라.\n\n' +
+      '각 추천에는 왜 음식이 필요한지와 어떤 음식과 함께하면 좋은지를 reason에 한국어 한 문장으로 적어라. ' +
+      '5점 만점 별점은 이 와인이 "음식이 꼭 필요한 스타일"에 얼마나 뚜렷하게 해당하는지를 나타낸다 — 정말 전형적일 때만 5점을 줘라. ' +
+      '아래 JSON으로만 답하라.\n' +
+      '{"추천":[{"id":숫자, "reason":"왜 음식이 필요한지와 어울리는 음식을 담은 한국어 한 문장", "별점":1~5}]}';
+
+    var result = callGemini_([{ text: prompt }]);
+    var list = Array.isArray(result) ? result : (result['추천'] || result.recommendations || result.list || []);
+    list.forEach(function (p) {
+      for (var i = 0; i < owned.length; i++) {
+        if (owned[i].rowIndex === p.id) {
+          out.push({ wine: owned[i], reason: p.reason || '', '별점': p['별점'] || 0 });
+          break;
+        }
+      }
+    });
+  } catch (e) {
+    return { picks: [] };
+  }
+
+  var cachePicks = out.map(function (p) {
+    return { id: p.wine.rowIndex, reason: p.reason, '별점': p['별점'] };
+  });
+  setPairingCache_(me, FOOD_REQUIRED_CACHE_KEY, { picks: cachePicks, sig: sig });
+
+  return { picks: out };
 }
 
 /**
