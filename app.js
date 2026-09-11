@@ -482,6 +482,7 @@ function showPage(p) {
   if (p === 'Food') {
     renderCellarPairingChips();
     renderTopPairings();
+    renderFoodRequired();
   }
   window.scrollTo(0, 0);
 }
@@ -522,6 +523,30 @@ function renderTopPairings() {
         return cardHtml(x.wine, reason);
       }).join('')
     : '<div class="empty"><span class="big">🤔</span>아직 별점 5점짜리<br>페어링이 없어요</div>';
+}
+
+/**
+ * 보유 와인 중 "음식 페어링이 사실상 필수적인" 스타일만 AI로 골라서 보여준다 —
+ * "안주없이 마실 와인 추천받기"의 반대. 서버에서 셀러 구성이 그대로면 캐시로
+ * 바로 돌려주기 때문에, Food 탭에 들어올 때마다 매번 AI를 새로 부르지는 않는다.
+ */
+function renderFoodRequired() {
+  var area = document.getElementById('foodRequiredArea');
+  area.innerHTML = '<div class="loading">🍷 고르는 중…</div>';
+  callAPI(function () { return API.recommendFoodRequired(); }).then(function (res) {
+    if (!res || res.error) {
+      area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(res && res.error) + '</div>';
+      return;
+    }
+    var picks = res.picks || [];
+    area.innerHTML = picks.length
+      ? picks.map(function (x) {
+          var stars = x['별점'] ? '<span class="stars">' + starsHtml(x['별점']) + '</span> ' : '';
+          var reason = (stars || x.reason) ? '<div class="reason">' + stars + esc(x.reason || '') + '</div>' : '';
+          return cardHtml(x.wine, reason);
+        }).join('')
+      : '<div class="empty"><span class="big">🍇</span>지금 셀러엔<br>그런 와인이 없어요</div>';
+  });
 }
 
 function load() {
