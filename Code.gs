@@ -76,8 +76,8 @@ function dispatch_(action, p) {
     case 'getWines':         return getWines(token);
     case 'addWine':          return addWine(token, p.data, p.photo);
     case 'addWines':         return addWines(token, p.list);
-    case 'updateWine':       return updateWine(token, p.row, p.data, p.photo);
-    case 'deleteWine':       return deleteWine(token, p.row);
+    case 'updateWine':       return updateWine(token, p.row, p.data, p.photo, p.expectedName);
+    case 'deleteWine':       return deleteWine(token, p.row, p.expectedName);
     case 'markDrunk':        return markDrunk(token, p.row, p.info);
     case 'unmarkDrunk':      return unmarkDrunk(token, p.row);
     case 'recognizeLabel':   return recognizeLabel(token, p.photo);
@@ -763,6 +763,24 @@ function requireOwnedRow_(me, rowIndex) {
   return sheet;
 }
 
+/**
+ * 같은 아이디를 여러 사람이 같이 쓸 때를 위한 안전장치. deleteRow는 그 아래 모든 행을
+ * 한 칸씩 당기기 때문에, 내가 보고 있는 목록을 불러온 뒤 다른 사람이 그 사이에 와인을
+ * 하나 지우면 내 화면에 남아있는 rowIndex들이 전부 실제와 한 칸씩 어긋난다. 그 상태로
+ * "수정"이나 "삭제"를 하면 내가 고른 와인이 아니라 그 자리로 밀려온 엉뚱한 와인이
+ * 조용히 바뀌거나 지워질 수 있다 — 이 함수는 그걸 막기 위해, 요청을 보낼 때 클라이언트가
+ * 같이 보낸 "이 와인일 거야"(와인명)가 지금 그 행의 실제 와인명과 같은지 먼저 확인하고,
+ * 다르면 조용히 넘어가지 않고 바로 에러를 던진다.
+ */
+function assertRowStillMatches_(sheet, headers, rowIndex, expectedName) {
+  if (expectedName === undefined || expectedName === null || String(expectedName).trim() === '') return;
+  var nameCol = colIndex1_(headers, '와인명');
+  var actualName = String(sheet.getRange(rowIndex, nameCol).getValue() || '').trim();
+  if (actualName !== String(expectedName).trim()) {
+    throw new Error('그 사이 목록이 바뀌었어요(다른 분이 셀러를 수정했을 수 있어요). 새로고침 후 다시 시도해주세요');
+  }
+}
+
 /** 새 와인 추가 (상태=보유, 등록일=오늘 자동). photoDataUrl은 선택. */
 function addWine(token, data, photoDataUrl) {
   var me = String(requireUser_(token)['아이디']);
@@ -788,11 +806,15 @@ function addWine(token, data, photoDataUrl) {
 var EDITABLE_FIELDS = ['와인명', '종류', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)',
   '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모', '평점', '구매처', '구매가격'];
 
-/** 와인 정보 수정. photoDataUrl을 보내면 라벨 사진을 새로 찍은 걸로 교체한다. */
-function updateWine(token, rowIndex, data, photoDataUrl) {
+/** 와인 정보 수정. photoDataUrl을 보내면 라벨 사진을 새로 찍은 걸로 교체한다.
+ * expectedName이 오면(수정 폼을 열 때 클라이언트가 보고 있던 와인명) 그 사이 행이
+ * 밀리지 않았는지 먼저 확인한다 — 같은 아이디를 여러 사람이 쓸 때 엉뚱한 와인이
+ * 조용히 바뀌는 걸 막기 위함. */
+function updateWine(token, rowIndex, data, photoDataUrl, expectedName) {
   var me = String(requireUser_(token)['아이디']);
   var sheet = requireOwnedRow_(me, rowIndex);
   var headers = getHeaders_();
+  assertRowStillMatches_(sheet, headers, Number(rowIndex), expectedName);
   EDITABLE_FIELDS.forEach(function (h) {
     if (headers.indexOf(h) === -1 || !data || data[h] === undefined) return;
     sheet.getRange(rowIndex, colIndex1_(headers, h)).setValue(data[h]);
@@ -814,10 +836,11 @@ function resolvePhotoUrl_(photoDataUrl, name) {
   return savePhoto_(photoDataUrl, name);
 }
 
-/** 실수로 등록한 와인 삭제. */
-function deleteWine(token, rowIndex) {
+/** 실수로 등록한 와인 삭제. expectedName은 updateWine과 같은 이유로 쓰는 안전장치. */
+function deleteWine(token, rowIndex, expectedName) {
   var me = String(requireUser_(token)['아이디']);
   var sheet = requireOwnedRow_(me, rowIndex);
+  assertRowStillMatches_(sheet, getHeaders_(), Number(rowIndex), expectedName);
   sheet.deleteRow(Number(rowIndex));
   return { ok: true };
 }
@@ -1311,7 +1334,7 @@ function recommendByFood(token, food) {
 
   var all = getWines(token).wines;
   var owned = all.filter(function (w) { return w['상태'] === '보유'; });
-  if (!owned.length && !food) return { picks: [], style: '' };
+  if (!owned.length && !food) return { picks: [], style: '', bestGrape: '' };
 
   var cacheKey = food ? pairingCacheKey_(food) : '';
   var sig = cellarSignature_(owned);
@@ -1329,7 +1352,7 @@ function recommendByFood(token, food) {
       var picks = (cached.picks || [])
         .filter(function (p) { return ownedById[p.id]; })
         .map(function (p) { return { wine: ownedById[p.id], reason: p.reason, '별점': p['별점'], matched: p.matched }; });
-      return { picks: picks, style: cached.style || '' };
+      return { picks: picks, style: cached.style || '', bestGrape: cached.bestGrape || '' };
     }
   }
 
@@ -1395,6 +1418,9 @@ function recommendByFood(token, food) {
         '"일반스타일"에는 지금 셀러에 있는지와 무관하게 이 음식(들)에 보통/일반적으로 잘 어울리는 ' +
         '와인 스타일을 지역·품종 위주로 두 문장 이내 한국어로 설명해라 ' +
         '(예: "산미 좋은 이탈리아 산지오베제나 스페인 템프라니요처럼 미디엄 바디 레드가 잘 어울려요"). ' +
+        '정말 감이 안 오면 빈 문자열로 남겨라. ' +
+        '"베스트품종"에는 지금 셀러 보유 여부와 무관하게 이 음식(들)에 가장 잘 어울린다고 딱 잘라 말할 수 있는 ' +
+        '품종을 1~2개만 쉼표로 짧게 적어라(설명 문장 없이 품종 이름만, 예: "산지오베제" 또는 "산지오베제, 네비올로"). ' +
         '정말 감이 안 오면 빈 문자열로 남겨라.')
       : ('오늘은 곁들일 음식 없이 와인만 마시고 싶다. 이런 자리엔 음식 없이도 그 자체로 편하게 즐길 수 있는, ' +
         '손님 맞이용 와인("포치 시퍼", Porch Sipper)이나 단독 시음용 와인이 잘 어울린다 — ' +
@@ -1414,12 +1440,13 @@ function recommendByFood(token, food) {
       '각 추천에는 5점 만점 별점을 매겨라 — 정말 완벽하게 어울릴 때만 5점을 주고, 자신 없으면 4점 이하로 줘라. ' +
       '아래 JSON으로만 답하라.\n' +
       (food
-        ? '{"추천":[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}], "일반스타일":"..."}'
+        ? '{"추천":[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}], "일반스타일":"...", "베스트품종":"..."}'
         : '{"추천":[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}]}');
 
     var result = callGemini_([{ text: prompt }]);
     var list = Array.isArray(result) ? result : (result['추천'] || result.recommendations || result.list || []);
     var style = (result && result['일반스타일']) || '';
+    var bestGrape = (result && result['베스트품종']) || '';
 
     var out = [];
     list.forEach(function (p) {
@@ -1440,9 +1467,9 @@ function recommendByFood(token, food) {
       var cachePicks = out.map(function (p) {
         return { id: p.wine.rowIndex, reason: p.reason, '별점': p['별점'], matched: p.matched };
       });
-      setPairingCache_(me, cacheKey, { picks: cachePicks, style: style, sig: sig });
+      setPairingCache_(me, cacheKey, { picks: cachePicks, style: style, bestGrape: bestGrape, sig: sig });
     }
-    return { picks: out, style: style };
+    return { picks: out, style: style, bestGrape: bestGrape };
   } catch (e) {
     // AI 실패 시(음식이 있을 때만) 아래 키워드 매칭으로 넘어감
     if (!food) return { picks: [], style: '' };
@@ -1453,7 +1480,8 @@ function recommendByFood(token, food) {
       x.matched = !!directIds[x.wine.rowIndex];
       return x;
     }),
-    style: ''
+    style: '',
+    bestGrape: ''
   };
 }
 

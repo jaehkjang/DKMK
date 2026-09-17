@@ -53,8 +53,10 @@ const API = {
   getWines()               { return this._get('getWines'); },
   addWine(data, photo)     { return this._post('addWine', { data, photo }); },
   addWines(list)           { return this._post('addWines', { list }); },
-  updateWine(row, data, photo) { return this._post('updateWine', { row, data, photo }); },
-  deleteWine(row)          { return this._post('deleteWine', { row }); },
+  // expectedName: 같은 아이디를 여러 사람이 같이 쓸 때, 그 사이 목록이 밀리지
+  // 않았는지 서버가 확인할 수 있게 클라이언트가 보고 있던 와인명을 같이 보낸다.
+  updateWine(row, data, photo, expectedName) { return this._post('updateWine', { row, data, photo, expectedName }); },
+  deleteWine(row, expectedName) { return this._post('deleteWine', { row, expectedName }); },
   markDrunk(row, info)     { return this._post('markDrunk', { row, info }); },
   unmarkDrunk(row)         { return this._post('unmarkDrunk', { row }); },
 

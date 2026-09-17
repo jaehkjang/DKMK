@@ -7,6 +7,9 @@
 var ALL_WINES = [], SEG = '보유', PENDING_ROW = null, CURRENT_RATING = 5;
 var PHOTO_DATAURL = null, PHOTO_UPLOADED_URL = null, PICKS = [], PICK_ON = {}, SELECTED_TYPE = '';
 var TOKEN = '', ME = '', EDIT_ROW = null, DETAIL_ROW = null, IS_ADMIN = false;
+// 수정 폼을 열 때 보고 있던 와인명 — 그 사이 다른 사람이 셀러를 바꿔서 행 번호가
+// 밀렸는지 제출할 때 서버가 확인할 수 있게 같이 보낸다.
+var EDIT_ORIG_NAME = '';
 var WINES_LOADED = false; // 탭을 오갈 때마다 매번 서버에 다시 안 물어보려고 세션 동안 캐시
 
 var TYPES = [
@@ -463,10 +466,11 @@ function showPage(p) {
   document.querySelectorAll('#tabbar div').forEach(function (t) { t.classList.toggle('on', t.dataset.p === p); });
   document.getElementById('pgTitle').textContent = TITLES[p];
   document.getElementById('pgCount').textContent = '';
-  // 이미 한 번 불러온 목록이 있으면 탭을 다시 눌러도 서버를 다시 안 부르고
-  // 캐시로 즉시 그린다 — 매번 왕복하느라 느려지는 걸 막는다. 실제로 데이터가
-  // 바뀌는 동작(추가/수정/삭제/마시기 등)은 각자 끝나고 load()를 다시 부른다.
-  if (p === 'Cellar') { if (WINES_LOADED) renderList(); else load(); }
+  // 이미 한 번 불러온 목록이 있으면 일단 캐시로 즉시 그려서 탭 전환이 빠르게 느껴지게
+  // 하고, 그 뒤에 곧바로 서버에서 다시 불러와 조용히 최신 상태로 맞춘다 — 같은 아이디를
+  // 여러 사람이 같이 쓸 때, 다른 사람이 그 사이 지우거나 바꾼 게 셀러 탭을 열 때마다
+  // 반드시 반영되게 하려는 것(캐시만 믿고 안 부르면 그 변화가 영영 안 보일 수 있다).
+  if (p === 'Cellar') { if (WINES_LOADED) renderList(); load(); }
   if (p === 'Stat') loadStats();
   if (p === 'Food') {
     renderCellarPairingChips();
@@ -670,7 +674,8 @@ function cardHtml(w, extraHtml) {
 
 /* ---------- 상세 ---------- */
 function openDetail(r) {
-  var w = findWine(r); if (!w) return;
+  var w = findWine(r);
+  if (!w) { toast('목록이 바뀌었어요, 새로고침할게요'); load(); return; }
   DETAIL_ROW = r;
   // 비어 있는 정보가 있고, 아직 AI에게 안 물어봤을 때만 한 번에 보충한다.
   // 응답이 와도 결과만 그 자리에 반영하고 다시 조회하지 않는다(재호출 루프 방지).
@@ -855,10 +860,16 @@ function shareWine(r) {
 
 /** 실수로 등록한 와인 삭제 (되돌리기 불가라 한 번 더 확인) */
 function deleteWineConfirm(r) {
-  var w = findWine(r); if (!w) return;
+  var w = findWine(r);
+  if (!w) { toast('목록이 바뀌었어요, 새로고침할게요'); load(); return; }
   if (!confirm((w['와인명'] || '이 와인') + '을(를) 삭제할까요? 되돌릴 수 없어요.')) return;
-  callAPI(function () { return API.deleteWine(r); }).then(function (res) {
-    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
+  callAPI(function () { return API.deleteWine(r, w['와인명']); }).then(function (res) {
+    if (!res || res.error) {
+      toast('실패: ' + ((res && res.error) || ''));
+      // 목록이 밀려서 실패한 거면 지금 든 rowIndex들을 더는 믿을 수 없으니 새로고침한다.
+      load();
+      return;
+    }
     cm('detailModal');
     toast('삭제했어요');
     load();
@@ -867,8 +878,10 @@ function deleteWineConfirm(r) {
 
 /** 잘못 입력된 정보를 고치러 "추가" 화면으로 이동 (같은 폼을 재사용) */
 function startEdit(r) {
-  var w = findWine(r); if (!w) return;
+  var w = findWine(r);
+  if (!w) { toast('목록이 바뀌었어요, 새로고침할게요'); cm('detailModal'); load(); return; }
   EDIT_ROW = r;
+  EDIT_ORIG_NAME = w['와인명'] || '';
   cm('detailModal');
 
   var fields = ['와인명', '품종', '빈티지', '생산지/국가', '메모', '구매처', '구매가격'];
@@ -905,6 +918,7 @@ function goAddFresh() {
 
 function resetAddForm() {
   EDIT_ROW = null;
+  EDIT_ORIG_NAME = '';
   document.querySelectorAll('#addForm input, #addForm textarea').forEach(function (el) { el.value = ''; });
   document.querySelectorAll('#typeChips button').forEach(function (x) { x.classList.remove('on'); });
   SELECTED_TYPE = ''; PHOTO_DATAURL = null; PHOTO_UPLOADED_URL = null;
@@ -1250,11 +1264,14 @@ function submitAdd(e) {
   var btn = document.getElementById('addBtn');
   btn.disabled = true; btn.textContent = editing ? '수정하는 중…' : '담는 중…';
   callAPI(function () {
-    return editing ? API.updateWine(EDIT_ROW, data, photo) : API.addWine(data, photo);
+    return editing ? API.updateWine(EDIT_ROW, data, photo, EDIT_ORIG_NAME) : API.addWine(data, photo);
   }).then(function (res) {
     if (!res || res.error) {
       toast('실패: ' + ((res && res.error) || ''));
       btn.disabled = false; btn.textContent = editing ? '수정하기' : '셀러에 넣기';
+      // 그 사이 목록이 밀려서 생긴 실패면(다른 사람이 셀러를 바꿨을 때) 지금 든 rowIndex가
+      // 더 이상 못 믿을 값이니, 다시 시도하기 전에 최신 목록으로 새로고침해둔다.
+      if (editing) load();
       return;
     }
     toast(editing ? '수정했어요' : '셀러에 담았어요 🍾');
@@ -1291,7 +1308,10 @@ function runRecommend(food, areaId) {
       return;
     }
     var picks = res.picks || [];
-    // 일반스타일은 셀러에 잘 맞는 와인이 있든 없든 항상 보여준다 — 내 와인과 별개로 참고할 정보라서.
+    // 베스트품종·일반스타일은 셀러에 잘 맞는 와인이 있든 없든 항상 보여준다 — 내 와인과 별개로 참고할 정보라서.
+    var bestGrapeHtml = res.bestGrape
+      ? '<div class="best-grape"><span class="best-grape-t">🏆 이 음식엔 이 품종이 최고예요</span><span class="best-grape-v">' + esc(res.bestGrape) + '</span></div>'
+      : '';
     var styleHtml = res.style
       ? '<div class="style-guide"><div class="style-guide-t">🍇 보통 이런 스타일이 잘 어울려요</div>' + esc(res.style) + '</div>'
       : '';
@@ -1304,7 +1324,7 @@ function runRecommend(food, areaId) {
         return cardHtml(w, badge + reason);
       }).join('')
       : '<div class="empty"><span class="big">🤔</span>지금 셀러에서<br>딱 맞는 걸 찾지 못했어요</div>';
-    area.innerHTML = styleHtml + picksHtml;
+    area.innerHTML = bestGrapeHtml + styleHtml + picksHtml;
   });
 }
 
