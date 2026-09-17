@@ -83,6 +83,7 @@ function dispatch_(action, p) {
     case 'recognizeLabel':   return recognizeLabel(token, p.photo);
     case 'recognizeCellar':  return recognizeCellar(token, p.photo);
     case 'recommendByFood':  return recommendByFood(token, p.food);
+    case 'recommendFoodRequired': return recommendFoodRequired(token);
     case 'getAdminOverview': return getAdminOverview(token);
     case 'deleteUserAccount': return deleteUserAccount(token, p.id);
     case 'getGlasses':       return getGlasses(token);
@@ -1369,8 +1370,21 @@ function recommendByFood(token, food) {
         '\n비슷한 품종·스타일의 와인이 지금 목록에 있으면 그 취향도 반영해서 우선순위를 살짝 더 높이고, ' +
         '취향이 반영됐으면 reason에 짧게 그 이유(예: "전에 좋아하셨던 산지오베제 계열")를 언급해라.') : '';
 
+    // 음식이 있을 때(페어링 매칭)만 적용하는 우선순위·원칙 — 안주 없이 마실 때는
+    // 음식과의 상호작용을 따질 필요가 없어서 붙이지 않는다.
+    var pairingPrinciples =
+      '\n\n페어링을 고를 때는 아래 우선순위와 원칙을 참고해라.\n' +
+      '[페어링을 추천하는 목적 — 우선순위]\n' +
+      '1) 음식과 와인이 서로의 풍미를 살려 시너지를 내는가\n' +
+      '2) 와인의 강한 자극(산도·탄닌)을 음식이 눌러주고 부드럽게 완화해주는가\n' +
+      '3) 음식이 입안을 한 번 씻어주는 팔레트 클렌저 역할을 하는가\n' +
+      '[페어링의 기본 원칙]\n' +
+      '1) 무게감 맞추기 — 가벼운 요리(샐러드·생선)엔 가벼운 와인(소비뇽 블랑·피노 누아), 헤비한 요리(스테이크·갈비찜)엔 무게감 있는 와인(까베르네 소비뇽·시라)을 맞춰라.\n' +
+      '2) 산도 맞추기 — 산도가 높은 요리(토마토소스·레몬 드레싱)에는 음식보다 산도가 같거나 더 높은 와인을 골라야 와인 맛이 밋밋해지지 않는다.\n' +
+      '3) 지역적 결합 — "함께 자란 것은 함께 어울린다"는 원칙으로, 그 지역 음식엔 같은 지역 와인(예: 토스카나 음식엔 토스카나 와인)이 잘 맞는다는 것도 참고해라.';
+
     var askText = food
-      ? ('오늘 먹을 음식(여러 개면 가운데 점 · 으로 구분됨): "' + food + '"' + prefText + '\n\n' +
+      ? ('오늘 먹을 음식(여러 개면 가운데 점 · 으로 구분됨): "' + food + '"' + prefText + pairingPrinciples + '\n\n' +
         (owned.length
           ? ('이 음식(들)에 가장 잘 어울리는 와인을 이 목록 안에서만 좋은 순서로 최대 3개 추천해라. ' +
             '음식이 여러 개면 그 자리에 다 같이 두루 잘 어울리는 와인을 우선하고, 마땅한 게 없으면 음식별로 가장 좋은 조합을 하나씩 골라도 된다. ' +
@@ -1382,8 +1396,14 @@ function recommendByFood(token, food) {
         '와인 스타일을 지역·품종 위주로 두 문장 이내 한국어로 설명해라 ' +
         '(예: "산미 좋은 이탈리아 산지오베제나 스페인 템프라니요처럼 미디엄 바디 레드가 잘 어울려요"). ' +
         '정말 감이 안 오면 빈 문자열로 남겨라.')
-      : ('오늘은 곁들일 음식 없이 와인만 마시고 싶다.' + prefText + '\n\n' +
-        '이 목록 안에서 오늘 그냥 마시기 좋은 와인을 좋은 순서로 최대 3개 추천해라. ' +
+      : ('오늘은 곁들일 음식 없이 와인만 마시고 싶다. 이런 자리엔 음식 없이도 그 자체로 편하게 즐길 수 있는, ' +
+        '손님 맞이용 와인("포치 시퍼", Porch Sipper)이나 단독 시음용 와인이 잘 어울린다 — ' +
+        '과실향이 풍부하고 산도·당도가 완만한 스타일을 우선해라.' + prefText + '\n\n' +
+        '반대로 음식과 함께여야 비로소 밸런스가 맞는, 즉 음식 페어링이 사실상 필수적인 스타일은 이 목록에서 제외해라 ' +
+        '(예: 이탈리아 바롤로·키안티 클라시코처럼 산도·탄닌이 거친 레드, 무스카데나 산도가 아주 높은 샤블리처럼 초산도/초건조 화이트, ' +
+        '피노 그리조처럼 지나치게 중립적이거나 가벼워서 그 자체로는 인상이 약한 와인). ' +
+        '그런 스타일만 있다면 억지로 추천하지 말고 "추천"을 빈 배열로 남겨라.\n\n' +
+        '이 목록 안에서 오늘 음식 없이 그냥 마시기 좋은 와인을 좋은 순서로 최대 3개 추천해라. ' +
         '와인 자체의 스타일·마시기 편한 정도(가벼움/묵직함)·평소 취향을 근거로 골라라.');
 
     var prompt = '너는 소믈리에다. 아래는 우리 집 와인 셀러에 지금 있는 와인 목록이고, ' +
@@ -1435,6 +1455,81 @@ function recommendByFood(token, food) {
     }),
     style: ''
   };
+}
+
+/**
+ * 보유 와인 중 "음식 페어링이 사실상 필수적인" 스타일만 골라준다 —
+ * recommendByFood(food='')가 추천하는 "안주 없이 마셔도 좋은 와인"의 반대 목록.
+ * 고산도/고탄닌의 거친 레드(바롤로·키안티 클라시코 등), 초산도/초건조 화이트(무스카데·
+ * 고산도 샤블리 등)처럼 자극이 강해 음식의 지방·감칠맛이 그 자극을 눌러줘야 편하게
+ * 마실 수 있는 스타일을 우선 고른다. 셀러 구성이 그대로면(cellarSignature_) 캐시를
+ * 쓰고, 바뀌면 다시 AI에 물어본다(recommendByFood의 캐시 방식과 동일).
+ * 반환: { picks: [{ wine, reason, 별점 }] }
+ */
+var FOOD_REQUIRED_CACHE_KEY = '__FOOD_REQUIRED__';
+function recommendFoodRequired(token) {
+  var me = String(requireUser_(token)['아이디']);
+  var all = getWines(token).wines;
+  var owned = all.filter(function (w) { return w['상태'] === '보유'; });
+  if (!owned.length) return { picks: [] };
+
+  var sig = cellarSignature_(owned);
+  var cached = getPairingCache_(me, FOOD_REQUIRED_CACHE_KEY);
+  if (cached && cached.sig === sig) {
+    var ownedById = {};
+    owned.forEach(function (w) { ownedById[w.rowIndex] = w; });
+    var picks = (cached.picks || [])
+      .filter(function (p) { return ownedById[p.id]; })
+      .map(function (p) { return { wine: ownedById[p.id], reason: p.reason, '별점': p['별점'] }; });
+    return { picks: picks };
+  }
+
+  var menu = owned.map(function (w) {
+    return {
+      id: w.rowIndex,
+      이름: w['와인명'],
+      종류: w['종류'],
+      품종: w['품종'],
+      생산지: w['생산지/국가'],
+      기존페어링: w['추천 페어링'] || '',
+      베스트페어링: w['베스트페어링'] || ''
+    };
+  });
+
+  var out = [];
+  try {
+    var prompt = '너는 소믈리에다. 아래는 우리 집 와인 셀러에 지금 있는 와인 목록이다.\n' +
+      JSON.stringify(menu) + '\n\n' +
+      '이 중에서 음식과 함께 마셔야 비로소 밸런스가 맞는, 즉 음식 페어링이 사실상 필수적인 스타일의 와인만 골라라. ' +
+      '예를 들면 이탈리아 바롤로·키안티 클라시코처럼 산도·탄닌이 거친 레드, 무스카데나 산도가 아주 높은 샤블리처럼 초산도/초건조 화이트처럼 ' +
+      '자극이 강해서 음식의 지방·감칠맛·단맛이 그 자극을 눌러줘야 편하게 마실 수 있는 스타일을 우선해라. ' +
+      '반대로 과실향이 풍부하고 산도·당도가 완만해서 음식 없이도 그 자체로 편하게 마실 수 있는 스타일(손님 맞이용/단독 시음용 와인)은 여기서 제외해라. ' +
+      '해당하는 와인이 하나도 없으면 억지로 채우지 말고 "추천"을 빈 배열로 남겨라.\n\n' +
+      '각 추천에는 왜 음식이 필요한지와 어떤 음식과 함께하면 좋은지를 reason에 한국어 한 문장으로 적어라. ' +
+      '5점 만점 별점은 이 와인이 "음식이 꼭 필요한 스타일"에 얼마나 뚜렷하게 해당하는지를 나타낸다 — 정말 전형적일 때만 5점을 줘라. ' +
+      '아래 JSON으로만 답하라.\n' +
+      '{"추천":[{"id":숫자, "reason":"왜 음식이 필요한지와 어울리는 음식을 담은 한국어 한 문장", "별점":1~5}]}';
+
+    var result = callGemini_([{ text: prompt }]);
+    var list = Array.isArray(result) ? result : (result['추천'] || result.recommendations || result.list || []);
+    list.forEach(function (p) {
+      for (var i = 0; i < owned.length; i++) {
+        if (owned[i].rowIndex === p.id) {
+          out.push({ wine: owned[i], reason: p.reason || '', '별점': p['별점'] || 0 });
+          break;
+        }
+      }
+    });
+  } catch (e) {
+    return { picks: [] };
+  }
+
+  var cachePicks = out.map(function (p) {
+    return { id: p.wine.rowIndex, reason: p.reason, '별점': p['별점'] };
+  });
+  setPairingCache_(me, FOOD_REQUIRED_CACHE_KEY, { picks: cachePicks, sig: sig });
+
+  return { picks: out };
 }
 
 /**

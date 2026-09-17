@@ -146,6 +146,27 @@
     .chips.sub:empty { display:none; }
     .match-badge { display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:800; color:var(--ok); background:#E7F2E9; padding:3px 9px; border-radius:20px; margin-top:8px; }
 
+    /* ---------- 페어링 추천 카드 ---------- */
+    .pairing-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:18px; margin-bottom:16px; box-shadow:var(--shadow); }
+    .pairing-card-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+    .pairing-card-icon { font-size:19px; line-height:1; }
+    .pairing-card-title { font-size:15.5px; font-weight:800; letter-spacing:-.2px; }
+    .pairing-card-desc { font-size:12.5px; color:var(--sub); line-height:1.55; margin-bottom:14px; }
+
+    /* 음식 카테고리 탭 — 가로로 스크롤되는 한 줄, 고른 카테고리만 진하게 */
+    .food-cats { display:flex; gap:6px; overflow-x:auto; padding-bottom:2px; margin-bottom:10px; scrollbar-width:none; }
+    .food-cats::-webkit-scrollbar { display:none; }
+    .food-cats button {
+    flex:0 0 auto; border:1.5px solid var(--line); background:var(--bg); color:var(--sub);
+    padding:8px 14px; border-radius:20px; font-size:13.5px; font-weight:700; white-space:nowrap;
+    }
+    .food-cats button.on { border-color:var(--wine); background:var(--wine); color:#fff; }
+
+    /* 지금까지 고른 음식 요약 줄 — 카테고리를 옮겨도 항상 보인다 */
+    .food-selected:empty { margin-bottom:0; }
+    .food-selected button { background:var(--wine-soft); border-color:var(--wine-soft); color:var(--wine); }
+    .food-selected button .x { margin-left:4px; opacity:.65; }
+
     .more-toggle { width:100%; text-align:center; padding:12px; color:var(--sub); font-size:13.5px; font-weight:700; background:none; border:none; }
 
     .primary-btn {

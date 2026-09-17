@@ -61,21 +61,42 @@
 
     <!-- 페어링 추천 -->
     <div id="pgFood" class="page">
-      <div class="sect" style="margin-top:0">🍽 음식부터 고르기</div>
-      <div class="field big">
-        <input id="foodInput" placeholder="아래에서 골라보세요 (여러 개도 가능)" readonly>
-      </div>
-      <div class="chips" id="foodQuick"></div>
-      <div class="chips sub" id="foodSub"></div>
-      <div id="foodCellarLabel" style="display:none;font-size:13px;font-weight:800;color:var(--sub);margin:6px 0 8px">🍷 우리 셀러 와인에 적힌 페어링</div>
-      <div class="chips" id="foodCellarChips"></div>
-      <button class="primary-btn" onclick="doRecommend()">어울리는 와인 찾기</button>
-      <button type="button" class="primary-btn alt" onclick="doRecommendNoFood()">안주없이 마실 와인 추천받기</button>
-      <div id="foodArea" style="margin-top:18px;"></div>
 
-      <div class="sect">⭐ 5점 페어링</div>
-      <div class="note" style="margin-bottom:12px">보유 와인 중 페어링 별점이 5점 만점인 것만 모았어요.</div>
-      <div id="foodTopArea"><div class="loading">불러오는 중…</div></div>
+      <div class="pairing-card">
+        <div class="pairing-card-head"><span class="pairing-card-icon">🍽️</span><span class="pairing-card-title">음식으로 와인 찾기</span></div>
+        <div class="pairing-card-desc">오늘 먹을 음식을 카테고리에서 골라보세요. 여러 개 골라도 다 같이 어울리는 와인을 찾아줘요.</div>
+
+        <div class="food-cats" id="foodCats"></div>
+        <div class="chips" id="foodDishes"></div>
+
+        <div id="foodCellarLabel" style="display:none;font-size:12.5px;font-weight:800;color:var(--sub);margin:2px 0 8px">🍷 우리 셀러 와인에 적힌 페어링</div>
+        <div class="chips" id="foodCellarChips"></div>
+
+        <div class="chips food-selected" id="foodSelectedChips"></div>
+
+        <button class="primary-btn" onclick="doRecommend()">🍷 어울리는 와인 찾기</button>
+        <div id="foodArea" style="margin-top:16px;"></div>
+      </div>
+
+      <div class="pairing-card">
+        <div class="pairing-card-head"><span class="pairing-card-icon">🥂</span><span class="pairing-card-title">안주 없이, 오늘은 그냥</span></div>
+        <div class="pairing-card-desc">손님 맞이용(Porch Sipper) · 단독 시음용 스타일 — 과실향이 풍부하고 산도·당도가 완만한 와인 위주로 추천해요.</div>
+        <button type="button" class="primary-btn alt" onclick="doRecommendNoFood()">안주없이 마실 와인 추천받기</button>
+        <div id="noFoodArea" style="margin-top:16px;"></div>
+      </div>
+
+      <div class="pairing-card">
+        <div class="pairing-card-head"><span class="pairing-card-icon">🍷</span><span class="pairing-card-title">음식이 꼭 필요한 와인</span></div>
+        <div class="pairing-card-desc">고산도·고탄닌 레드나 초산도 화이트처럼, 음식과 함께 마셔야 진짜 매력이 나오는 스타일만 모았어요.</div>
+        <div id="foodRequiredArea"><div class="loading">불러오는 중…</div></div>
+      </div>
+
+      <div class="pairing-card">
+        <div class="pairing-card-head"><span class="pairing-card-icon">⭐</span><span class="pairing-card-title">5점 페어링</span></div>
+        <div class="pairing-card-desc">보유 와인 중 페어링 별점이 5점 만점인 것만 모았어요.</div>
+        <div id="foodTopArea"><div class="loading">불러오는 중…</div></div>
+      </div>
+
     </div>
 
     <!-- 추가 -->
@@ -199,7 +220,7 @@
         <ol>
           <li><b>와인 추가</b> — 하단 "추가" 탭의 라벨 찍기 버튼을 눌러 사진을 찍으면 이름·품종·생산지가 자동으로 인식돼요.</li>
           <li><b>와인 정보 확인</b> — 셀러 목록에서 와인을 누르면 서빙 온도, 어울리는 잔, 어울리는 음식이 자동으로 채워져 나와요.</li>
-          <li><b>페어링 추천</b> — 페어링 추천 탭에서 먹고 싶은 음식을 고르면 어울리는 와인을 찾아줘요. 음식 없이 오늘 그냥 마시기 좋은 와인만 추천받을 수도 있어요.</li>
+          <li><b>페어링 추천</b> — 페어링 추천 탭에서 먹고 싶은 음식을 고르면 어울리는 와인을 찾아줘요. 음식 없이 오늘 그냥 마시기 좋은 와인만 추천받을 수도 있고, 반대로 음식과 함께 마셔야 진짜 매력이 나오는 와인만 모아볼 수도 있어요.</li>
           <li><b>마시기 기록</b> — 와인을 마셨으면 "마시기" 버튼으로 별점·한줄평·재구매 의향을 남겨요.</li>
           <li><b>기록 보기</b> — 기록 탭에서 지금까지 마신 와인 통계와, 같은 와인을 여러 번 마셨을 때의 평점 변화를 볼 수 있어요.</li>
           <li><b>설정</b> — 비밀번호 변경, 내가 가진 잔 등록, 기존 와인 정보 한번에 채우기, 홈 화면에 추가/공유를 할 수 있어요.</li>
