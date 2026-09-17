@@ -1291,7 +1291,10 @@ function runRecommend(food, areaId) {
       return;
     }
     var picks = res.picks || [];
-    // 일반스타일은 셀러에 잘 맞는 와인이 있든 없든 항상 보여준다 — 내 와인과 별개로 참고할 정보라서.
+    // 베스트품종·일반스타일은 셀러에 잘 맞는 와인이 있든 없든 항상 보여준다 — 내 와인과 별개로 참고할 정보라서.
+    var bestGrapeHtml = res.bestGrape
+      ? '<div class="best-grape"><span class="best-grape-t">🏆 이 음식엔 이 품종이 최고예요</span><span class="best-grape-v">' + esc(res.bestGrape) + '</span></div>'
+      : '';
     var styleHtml = res.style
       ? '<div class="style-guide"><div class="style-guide-t">🍇 보통 이런 스타일이 잘 어울려요</div>' + esc(res.style) + '</div>'
       : '';
@@ -1304,7 +1307,7 @@ function runRecommend(food, areaId) {
         return cardHtml(w, badge + reason);
       }).join('')
       : '<div class="empty"><span class="big">🤔</span>지금 셀러에서<br>딱 맞는 걸 찾지 못했어요</div>';
-    area.innerHTML = styleHtml + picksHtml;
+    area.innerHTML = bestGrapeHtml + styleHtml + picksHtml;
   });
 }
 

@@ -1311,7 +1311,7 @@ function recommendByFood(token, food) {
 
   var all = getWines(token).wines;
   var owned = all.filter(function (w) { return w['상태'] === '보유'; });
-  if (!owned.length && !food) return { picks: [], style: '' };
+  if (!owned.length && !food) return { picks: [], style: '', bestGrape: '' };
 
   var cacheKey = food ? pairingCacheKey_(food) : '';
   var sig = cellarSignature_(owned);
@@ -1329,7 +1329,7 @@ function recommendByFood(token, food) {
       var picks = (cached.picks || [])
         .filter(function (p) { return ownedById[p.id]; })
         .map(function (p) { return { wine: ownedById[p.id], reason: p.reason, '별점': p['별점'], matched: p.matched }; });
-      return { picks: picks, style: cached.style || '' };
+      return { picks: picks, style: cached.style || '', bestGrape: cached.bestGrape || '' };
     }
   }
 
@@ -1395,6 +1395,9 @@ function recommendByFood(token, food) {
         '"일반스타일"에는 지금 셀러에 있는지와 무관하게 이 음식(들)에 보통/일반적으로 잘 어울리는 ' +
         '와인 스타일을 지역·품종 위주로 두 문장 이내 한국어로 설명해라 ' +
         '(예: "산미 좋은 이탈리아 산지오베제나 스페인 템프라니요처럼 미디엄 바디 레드가 잘 어울려요"). ' +
+        '정말 감이 안 오면 빈 문자열로 남겨라. ' +
+        '"베스트품종"에는 지금 셀러 보유 여부와 무관하게 이 음식(들)에 가장 잘 어울린다고 딱 잘라 말할 수 있는 ' +
+        '품종을 1~2개만 쉼표로 짧게 적어라(설명 문장 없이 품종 이름만, 예: "산지오베제" 또는 "산지오베제, 네비올로"). ' +
         '정말 감이 안 오면 빈 문자열로 남겨라.')
       : ('오늘은 곁들일 음식 없이 와인만 마시고 싶다. 이런 자리엔 음식 없이도 그 자체로 편하게 즐길 수 있는, ' +
         '손님 맞이용 와인("포치 시퍼", Porch Sipper)이나 단독 시음용 와인이 잘 어울린다 — ' +
@@ -1414,12 +1417,13 @@ function recommendByFood(token, food) {
       '각 추천에는 5점 만점 별점을 매겨라 — 정말 완벽하게 어울릴 때만 5점을 주고, 자신 없으면 4점 이하로 줘라. ' +
       '아래 JSON으로만 답하라.\n' +
       (food
-        ? '{"추천":[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}], "일반스타일":"..."}'
+        ? '{"추천":[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}], "일반스타일":"...", "베스트품종":"..."}'
         : '{"추천":[{"id":숫자, "reason":"왜 어울리는지 한국어 한 문장", "별점":1~5, "fromCellarPairing":true또는false}]}');
 
     var result = callGemini_([{ text: prompt }]);
     var list = Array.isArray(result) ? result : (result['추천'] || result.recommendations || result.list || []);
     var style = (result && result['일반스타일']) || '';
+    var bestGrape = (result && result['베스트품종']) || '';
 
     var out = [];
     list.forEach(function (p) {
@@ -1440,9 +1444,9 @@ function recommendByFood(token, food) {
       var cachePicks = out.map(function (p) {
         return { id: p.wine.rowIndex, reason: p.reason, '별점': p['별점'], matched: p.matched };
       });
-      setPairingCache_(me, cacheKey, { picks: cachePicks, style: style, sig: sig });
+      setPairingCache_(me, cacheKey, { picks: cachePicks, style: style, bestGrape: bestGrape, sig: sig });
     }
-    return { picks: out, style: style };
+    return { picks: out, style: style, bestGrape: bestGrape };
   } catch (e) {
     // AI 실패 시(음식이 있을 때만) 아래 키워드 매칭으로 넘어감
     if (!food) return { picks: [], style: '' };
@@ -1453,7 +1457,8 @@ function recommendByFood(token, food) {
       x.matched = !!directIds[x.wine.rowIndex];
       return x;
     }),
-    style: ''
+    style: '',
+    bestGrape: ''
   };
 }
 
