@@ -76,8 +76,8 @@ function dispatch_(action, p) {
     case 'getWines':         return getWines(token);
     case 'addWine':          return addWine(token, p.data, p.photo);
     case 'addWines':         return addWines(token, p.list);
-    case 'updateWine':       return updateWine(token, p.row, p.data, p.photo);
-    case 'deleteWine':       return deleteWine(token, p.row);
+    case 'updateWine':       return updateWine(token, p.row, p.data, p.photo, p.expectedName);
+    case 'deleteWine':       return deleteWine(token, p.row, p.expectedName);
     case 'markDrunk':        return markDrunk(token, p.row, p.info);
     case 'unmarkDrunk':      return unmarkDrunk(token, p.row);
     case 'recognizeLabel':   return recognizeLabel(token, p.photo);
@@ -763,6 +763,24 @@ function requireOwnedRow_(me, rowIndex) {
   return sheet;
 }
 
+/**
+ * 같은 아이디를 여러 사람이 같이 쓸 때를 위한 안전장치. deleteRow는 그 아래 모든 행을
+ * 한 칸씩 당기기 때문에, 내가 보고 있는 목록을 불러온 뒤 다른 사람이 그 사이에 와인을
+ * 하나 지우면 내 화면에 남아있는 rowIndex들이 전부 실제와 한 칸씩 어긋난다. 그 상태로
+ * "수정"이나 "삭제"를 하면 내가 고른 와인이 아니라 그 자리로 밀려온 엉뚱한 와인이
+ * 조용히 바뀌거나 지워질 수 있다 — 이 함수는 그걸 막기 위해, 요청을 보낼 때 클라이언트가
+ * 같이 보낸 "이 와인일 거야"(와인명)가 지금 그 행의 실제 와인명과 같은지 먼저 확인하고,
+ * 다르면 조용히 넘어가지 않고 바로 에러를 던진다.
+ */
+function assertRowStillMatches_(sheet, headers, rowIndex, expectedName) {
+  if (expectedName === undefined || expectedName === null || String(expectedName).trim() === '') return;
+  var nameCol = colIndex1_(headers, '와인명');
+  var actualName = String(sheet.getRange(rowIndex, nameCol).getValue() || '').trim();
+  if (actualName !== String(expectedName).trim()) {
+    throw new Error('그 사이 목록이 바뀌었어요(다른 분이 셀러를 수정했을 수 있어요). 새로고침 후 다시 시도해주세요');
+  }
+}
+
 /** 새 와인 추가 (상태=보유, 등록일=오늘 자동). photoDataUrl은 선택. */
 function addWine(token, data, photoDataUrl) {
   var me = String(requireUser_(token)['아이디']);
@@ -788,11 +806,15 @@ function addWine(token, data, photoDataUrl) {
 var EDITABLE_FIELDS = ['와인명', '종류', '품종', '빈티지', '생산지/국가', '평균가격(국내·원)',
   '평균가격(글로벌·USD)', '추천 페어링', '어울리는잔', '서빙방법', '와인배경', '메모', '평점', '구매처', '구매가격'];
 
-/** 와인 정보 수정. photoDataUrl을 보내면 라벨 사진을 새로 찍은 걸로 교체한다. */
-function updateWine(token, rowIndex, data, photoDataUrl) {
+/** 와인 정보 수정. photoDataUrl을 보내면 라벨 사진을 새로 찍은 걸로 교체한다.
+ * expectedName이 오면(수정 폼을 열 때 클라이언트가 보고 있던 와인명) 그 사이 행이
+ * 밀리지 않았는지 먼저 확인한다 — 같은 아이디를 여러 사람이 쓸 때 엉뚱한 와인이
+ * 조용히 바뀌는 걸 막기 위함. */
+function updateWine(token, rowIndex, data, photoDataUrl, expectedName) {
   var me = String(requireUser_(token)['아이디']);
   var sheet = requireOwnedRow_(me, rowIndex);
   var headers = getHeaders_();
+  assertRowStillMatches_(sheet, headers, Number(rowIndex), expectedName);
   EDITABLE_FIELDS.forEach(function (h) {
     if (headers.indexOf(h) === -1 || !data || data[h] === undefined) return;
     sheet.getRange(rowIndex, colIndex1_(headers, h)).setValue(data[h]);
@@ -814,10 +836,11 @@ function resolvePhotoUrl_(photoDataUrl, name) {
   return savePhoto_(photoDataUrl, name);
 }
 
-/** 실수로 등록한 와인 삭제. */
-function deleteWine(token, rowIndex) {
+/** 실수로 등록한 와인 삭제. expectedName은 updateWine과 같은 이유로 쓰는 안전장치. */
+function deleteWine(token, rowIndex, expectedName) {
   var me = String(requireUser_(token)['아이디']);
   var sheet = requireOwnedRow_(me, rowIndex);
+  assertRowStillMatches_(sheet, getHeaders_(), Number(rowIndex), expectedName);
   sheet.deleteRow(Number(rowIndex));
   return { ok: true };
 }
