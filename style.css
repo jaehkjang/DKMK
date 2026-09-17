@@ -168,8 +168,6 @@
     .food-selected button .x { margin-left:4px; opacity:.65; }
 
     .more-toggle { width:100%; text-align:center; padding:12px; color:var(--sub); font-size:13.5px; font-weight:700; background:none; border:none; }
-    #moreFields { display:none; }
-    #moreFields.on { display:block; }
 
     .primary-btn {
     width:100%; padding:16px; border:none; border-radius:14px;
