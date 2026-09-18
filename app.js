@@ -474,48 +474,9 @@ function showPage(p) {
   if (p === 'Stat') loadStats();
   if (p === 'Food') {
     renderCellarPairingChips();
-    renderTopPairings();
     renderFoodRequired();
   }
   window.scrollTo(0, 0);
-}
-
-/**
- * 보유 와인 중, 클래식 페어링이나 제안 페어링 별점이 5점 만점인 것만 골라낸다.
- * AI를 다시 부르지 않고 이미 셀러에 적혀 있는 페어링 정보를 그대로 훑는 것이라
- * (getWines로 받아둔 캐시만 쓴다) 즉시 뜬다.
- */
-function cellarTopPairings() {
-  return ALL_WINES.filter(function (w) { return w['상태'] === '보유'; })
-    .map(function (w) {
-      var hits = [];
-      if (w['베스트페어링'] && parseInt(w['베스트페어링별점'], 10) === 5) hits.push(['🍽 클래식 페어링', w['베스트페어링']]);
-      if (w['추천 페어링'] && parseInt(w['추천페어링별점'], 10) === 5) hits.push(['🍽 제안 페어링', w['추천 페어링']]);
-      return { wine: w, hits: hits };
-    })
-    .filter(function (x) { return x.hits.length; });
-}
-
-function renderTopPairings() {
-  var area = document.getElementById('foodTopArea');
-  if (!WINES_LOADED) {
-    area.innerHTML = '<div class="loading">불러오는 중…</div>';
-    callAPI(function () { return API.getWines(); }).then(function (d) {
-      if (!d || d.error) { area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(d && d.error) + '</div>'; return; }
-      ALL_WINES = d.wines; WINES_LOADED = true;
-      renderTopPairings();
-    });
-    return;
-  }
-  var list = cellarTopPairings();
-  area.innerHTML = list.length
-    ? list.map(function (x) {
-        var reason = '<div class="reason">' + x.hits.map(function (h) {
-          return h[0] + ': ' + esc(h[1]) + ' ' + starsHtml(5);
-        }).join('<br>') + '</div>';
-        return cardHtml(x.wine, reason);
-      }).join('')
-    : '<div class="empty"><span class="big">🤔</span>아직 별점 5점짜리<br>페어링이 없어요</div>';
 }
 
 /**
