@@ -1424,7 +1424,7 @@ function openStatList(i) {
   document.querySelector('#statListModal .modal').scrollTop = 0;
 }
 
-/** 막대그래프 — 항목 수가 많거나(품종) 순서가 의미 있는(월별) 데이터용 */
+/** 막대그래프 — 항목 수가 많은(품종) 데이터용 */
 function statBarsHtml(label, entries, color) {
   var max = entries.reduce(function (m, e) { return Math.max(m, e[1].length); }, 1);
   return entries.map(function (e) {
@@ -1433,6 +1433,47 @@ function statBarsHtml(label, entries, color) {
       '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:' + color + ';width:' + (e[1].length / max * 100) + '%"></div></div>' +
       '<div class="n">' + e[1].length + '</div><span class="chev">›</span></div></div>';
   }).join('');
+}
+
+/** "2025-03" → "25.3" (달력 눈금 라벨용, 짧게) */
+function fmtMonthShort(ym) {
+  var m = String(ym).match(/^(\d{4})-(\d{2})$/);
+  return m ? m[1].slice(2) + '.' + parseInt(m[2], 10) : ym;
+}
+
+/**
+ * 꺾은선(추세) 그래프 — 월별처럼 시간 순서를 따라 늘고 주는 흐름이 중요한 데이터용.
+ * entries는 오래된 달 → 최근 달 순으로 와야 왼쪽에서 오른쪽으로 흘러가듯 읽힌다.
+ * 달 수가 많아지면 그래프가 옆으로 길어지므로 감싸는 div가 가로 스크롤을 한다.
+ */
+function statTrendHtml(label, entries, color) {
+  if (!entries.length) return '';
+  var max = entries.reduce(function (m, e) { return Math.max(m, e[1].length); }, 1);
+  var stepX = 48, padX = 24, padTop = 22, padBottom = 34, h = 130;
+  var innerH = h - padTop - padBottom;
+  var refs = entries.map(function (e) { return statListRef(label + ' · ' + e[0], e[1]); });
+  var pts = entries.map(function (e, i) {
+    return { x: padX + stepX * i, y: padTop + innerH - (e[1].length / max * innerH), count: e[1].length, key: e[0] };
+  });
+  var w = padX * 2 + stepX * Math.max(entries.length - 1, 0);
+  var linePath = pts.length > 1
+    ? pts.map(function (p, i) { return (i ? 'L' : 'M') + p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ')
+    : '';
+  var areaPath = linePath && (linePath +
+    ' L' + pts[pts.length - 1].x.toFixed(1) + ',' + (h - padBottom) +
+    ' L' + pts[0].x.toFixed(1) + ',' + (h - padBottom) + ' Z');
+  var dots = pts.map(function (p, i) {
+    return '<g class="trend-pt" onclick="openStatList(' + refs[i] + ')">' +
+      '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="14" fill="transparent"/>' +
+      '<circle class="trend-dot" cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="4" fill="' + color + '"/>' +
+      '<text class="trend-count" x="' + p.x.toFixed(1) + '" y="' + (p.y - 10).toFixed(1) + '">' + p.count + '</text>' +
+      '<text class="trend-label" x="' + p.x.toFixed(1) + '" y="' + (h - padBottom + 18) + '">' + esc(fmtMonthShort(p.key)) + '</text>' +
+      '<title>' + esc(p.key) + ' · ' + p.count + '병</title></g>';
+  }).join('');
+  return '<div class="trend-scroll"><svg class="trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="' + h + '" role="img" aria-label="' + esc(label) + ' 추세 그래프">' +
+    (areaPath ? '<path class="trend-area" d="' + areaPath + '" fill="' + color + '" stroke="none"/>' : '') +
+    (linePath ? '<path class="trend-line" d="' + linePath + '" fill="none" stroke="' + color + '"/>' : '') +
+    dots + '</svg></div>';
 }
 
 /**
@@ -1489,17 +1530,17 @@ function renderStats() {
   STAT_LISTS = [];
   var priceEntries = PRICE_BRACKETS.filter(function (k) { return s.byPrice[k]; })
     .map(function (k) { return [k, s.byPrice[k]]; });
-  // 월별은 많이 마신 순이 아니라 최근 달부터 시간 순으로
-  var monthEntries = Object.keys(s.byMonth).sort().reverse()
+  // 월별은 추세 그래프라서 오래된 달 → 최근 달 순으로, 왼쪽에서 오른쪽으로 흘러가듯 보여준다
+  var monthEntries = Object.keys(s.byMonth).sort()
     .map(function (k) { return [k, s.byMonth[k]]; });
   area.innerHTML =
     '<div class="hero"><div class="n">' + s.totalDrunk + '</div><div class="l">지금까지 마신 와인</div></div>' +
     '<div class="stat-hint">숫자나 그래프를 누르면 해당 와인 목록을 볼 수 있어요</div>' +
     '<div class="sect">종류별</div>' + statPieHtml('종류별', sortedEntries(s.byType), function (k) { return typeStyle(k).c; }) +
     '<div class="sect">가격대별</div>' + statPieHtml('가격대별', priceEntries, function (k) { return PRICE_COLORS[k]; }) +
+    '<div class="sect">월별</div>' + statTrendHtml('월별', monthEntries, 'var(--wine)') +
     '<div class="sect">품종별 <span class="sect-note">블렌드는 품종마다 한 번씩 세요</span></div>' +
     statBarsHtml('품종별', sortedEntries(s.byGrape), 'var(--wine)') +
-    '<div class="sect">월별</div>' + statBarsHtml('월별', monthEntries, 'var(--wine)') +
     repeatHistoryHtml(computeRepeatHistory(ALL_WINES)) +
     '<div style="text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--sub)">' +
     '🍷 ' + esc(ME) + ' 셀러</div>';
