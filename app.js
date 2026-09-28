@@ -510,6 +510,10 @@ function load() {
       return;
     }
     ALL_WINES = d.wines; WINES_LOADED = true; renderList();
+    // 기록 탭 목록에서 와인을 되돌리거나 고친 경우, 통계와 열려 있던 목록이 옛 데이터로 남지 않게
+    if (document.getElementById('pgStat').classList.contains('on')) {
+      cm('statListModal'); renderStats();
+    }
   });
 }
 
@@ -1323,28 +1327,37 @@ function parseGrapesClient(raw) {
     .filter(Boolean);
 }
 
+/** 가격대 구간 — 파이 조각과 범례를 싼 것부터 비싼 것 순으로 늘어놓는 기준이기도 하다 */
+var PRICE_BRACKETS = ['3만원 미만', '3~7만원', '7~15만원', '15만원 이상', '가격정보없음'];
+
+/**
+ * 항목별로 "몇 병"만 세지 않고 그 항목에 들어간 와인 목록까지 같이 모아 둔다.
+ * (통계 수치를 누르면 해당 와인들을 보여주기 위해서)
+ */
 function computeStats(wines) {
   var drunk = wines.filter(function (w) { return w['상태'] === '마심'; });
   var byMonth = {}, byType = {}, byGrape = {}, byPrice = {};
+  function add(obj, k, w) { (obj[k] = obj[k] || []).push(w); }
   drunk.forEach(function (w) {
     var month = (w['마신날짜'] || '').slice(0, 7);
-    if (month) byMonth[month] = (byMonth[month] || 0) + 1;
+    if (month) add(byMonth, month, w);
 
-    var type = w['종류'] || '기타';
-    byType[type] = (byType[type] || 0) + 1;
+    add(byType, w['종류'] || '기타', w);
 
     var grapes = parseGrapesClient(w['품종']);
     if (!grapes.length) grapes = ['품종 미상'];
-    grapes.forEach(function (g) { byGrape[g] = (byGrape[g] || 0) + 1; });
+    // 같은 품종이 한 와인에 두 번 적혀 있어도 그 와인은 한 번만 센다
+    grapes.filter(function (g, i) { return grapes.indexOf(g) === i; })
+      .forEach(function (g) { add(byGrape, g, w); });
 
     var priceMatch = String(w['평균가격(국내·원)'] || '').match(/[\d,]+/);
     var priceNum = priceMatch ? parseInt(priceMatch[0].replace(/,/g, ''), 10) : 0;
     var bracket = !priceNum ? '가격정보없음'
-      : priceNum < 30000 ? '3만원 미만'
-      : priceNum < 70000 ? '3~7만원'
-      : priceNum < 150000 ? '7~15만원'
-      : '15만원 이상';
-    byPrice[bracket] = (byPrice[bracket] || 0) + 1;
+      : priceNum < 30000 ? PRICE_BRACKETS[0]
+      : priceNum < 70000 ? PRICE_BRACKETS[1]
+      : priceNum < 150000 ? PRICE_BRACKETS[2]
+      : PRICE_BRACKETS[3];
+    add(byPrice, bracket, w);
   });
   return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byGrape: byGrape, byPrice: byPrice };
 }
@@ -1386,6 +1399,86 @@ function repeatHistoryHtml(groups) {
   }).join('');
 }
 
+/**
+ * 통계 항목을 눌렀을 때 보여줄 와인 목록. onclick 속성에 품종 이름 같은 문자열을
+ * 그대로 넣으면 따옴표 이스케이프가 까다로워서, 목록은 여기 모아 두고 번호로만 가리킨다.
+ */
+var STAT_LISTS = [];
+function statListRef(title, wines) {
+  STAT_LISTS.push({ title: title, wines: wines });
+  return STAT_LISTS.length - 1;
+}
+
+function openStatList(i) {
+  var item = STAT_LISTS[i];
+  if (!item) return;
+  var wines = item.wines.slice().sort(function (a, b) {
+    return String(b['마신날짜'] || '').localeCompare(String(a['마신날짜'] || ''));
+  });
+  document.getElementById('statListBody').innerHTML =
+    '<h3>' + esc(item.title) + '</h3>' +
+    '<div class="stat-list-sub">' + wines.length + '병 · 최근에 마신 순</div>' +
+    wines.map(function (w) { return cardHtml(w); }).join('') +
+    '<button class="more-toggle" onclick="cm(\'statListModal\')">닫기</button>';
+  om('statListModal');
+  document.querySelector('#statListModal .modal').scrollTop = 0;
+}
+
+/** 막대그래프 — 항목 수가 많거나(품종) 순서가 의미 있는(월별) 데이터용 */
+function statBarsHtml(label, entries, color) {
+  var max = entries.reduce(function (m, e) { return Math.max(m, e[1].length); }, 1);
+  return entries.map(function (e) {
+    var ref = statListRef(label + ' · ' + e[0], e[1]);
+    return '<div class="bar-row tap" onclick="openStatList(' + ref + ')"><div class="k">' + esc(e[0]) + '</div>' +
+      '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:' + color + ';width:' + (e[1].length / max * 100) + '%"></div></div>' +
+      '<div class="n">' + e[1].length + '</div><span class="chev">›</span></div></div>';
+  }).join('');
+}
+
+/**
+ * 원형(도넛)그래프 — 한 와인이 딱 한 칸에만 들어가서 조각을 다 더하면 전체가 되는
+ * 데이터(종류, 가격대)용. 조각마다 circle 하나를 stroke-dasharray로 잘라 그려서
+ * 조각 자체도 누를 수 있다. 조각이 작으면 누르기 어려우니 옆 범례도 똑같이 눌린다.
+ */
+function statPieHtml(label, entries, colorOf) {
+  var total = entries.reduce(function (s, e) { return s + e[1].length; }, 0);
+  var R = 15.9155; // 둘레가 100이 되는 반지름 → dasharray를 퍼센트로 바로 쓸 수 있다
+  var gap = entries.length > 1 ? 0.6 : 0;
+  var acc = 0;
+  var refs = entries.map(function (e) { return statListRef(label + ' · ' + e[0], e[1]); });
+  var slices = entries.map(function (e, i) {
+    var pct = e[1].length / total * 100;
+    var len = Math.max(pct - gap, 0.01);
+    // 12시 방향부터 시계방향으로 쌓는다
+    var html = '<circle class="pie-slice" r="' + R + '" cx="21" cy="21" fill="none" stroke="' + colorOf(e[0], i) + '"' +
+      ' stroke-width="7.5" stroke-dasharray="' + len.toFixed(3) + ' ' + (100 - len).toFixed(3) + '"' +
+      ' stroke-dashoffset="' + (25 - acc - gap / 2).toFixed(3) + '" onclick="openStatList(' + refs[i] + ')">' +
+      '<title>' + esc(e[0]) + ' ' + e[1].length + '병</title></circle>';
+    acc += pct;
+    return html;
+  }).join('');
+  var legend = entries.map(function (e, i) {
+    var pct = Math.round(e[1].length / total * 100);
+    return '<div class="pie-leg tap" onclick="openStatList(' + refs[i] + ')">' +
+      '<span class="sw" style="background:' + colorOf(e[0], i) + '"></span>' +
+      '<span class="k">' + esc(e[0]) + '</span>' +
+      '<span class="n">' + e[1].length + '<small>병 · ' + pct + '%</small></span><span class="chev">›</span></div>';
+  }).join('');
+  return '<div class="pie-box">' +
+    '<svg class="pie" viewBox="0 0 42 42" role="img" aria-label="' + esc(label) + ' 원형그래프">' + slices +
+    '<text x="21" y="21" class="pie-total">' + total + '</text>' +
+    '<text x="21" y="26.5" class="pie-unit">병</text></svg>' +
+    '<div class="pie-legend">' + legend + '</div></div>';
+}
+
+function sortedEntries(obj) {
+  return Object.keys(obj).map(function (k) { return [k, obj[k]]; })
+    .sort(function (a, b) { return b[1].length - a[1].length; });
+}
+
+// 가격대는 싼 것 → 비싼 것 순서라서, 색도 옅은 와인색 → 진한 와인색으로 한 계열로 칠한다
+var PRICE_COLORS = { '3만원 미만':'#E3A3B0', '3~7만원':'#C45C73', '7~15만원':'#8C1D33', '15만원 이상':'#4E0F1D', '가격정보없음':'#C9BEB2' };
+
 function renderStats() {
   var area = document.getElementById('statArea');
   var s = computeStats(ALL_WINES);
@@ -1393,22 +1486,20 @@ function renderStats() {
     area.innerHTML = '<div class="empty"><span class="big">📊</span>마신 와인이 쌓이면<br>여기에 기록이 보여요</div>';
     return;
   }
-  function sect(title, obj, colorByType) {
-    var es = Object.keys(obj).map(function (k) { return [k, obj[k]]; }).sort(function (a, b) { return b[1] - a[1]; });
-    var max = es.reduce(function (m, e) { return Math.max(m, e[1]); }, 1);
-    return '<div class="sect">' + title + '</div>' + es.map(function (e) {
-      var c = colorByType ? typeStyle(e[0]).c : 'var(--wine)';
-      return '<div class="bar-row"><div class="k">' + esc(e[0]) + '</div>' +
-        '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:' + c + ';width:' + (e[1] / max * 100) + '%"></div></div>' +
-        '<div class="n">' + e[1] + '</div></div></div>';
-    }).join('');
-  }
+  STAT_LISTS = [];
+  var priceEntries = PRICE_BRACKETS.filter(function (k) { return s.byPrice[k]; })
+    .map(function (k) { return [k, s.byPrice[k]]; });
+  // 월별은 많이 마신 순이 아니라 최근 달부터 시간 순으로
+  var monthEntries = Object.keys(s.byMonth).sort().reverse()
+    .map(function (k) { return [k, s.byMonth[k]]; });
   area.innerHTML =
     '<div class="hero"><div class="n">' + s.totalDrunk + '</div><div class="l">지금까지 마신 와인</div></div>' +
-    sect('종류별', s.byType, true) +
-    sect('품종별', s.byGrape, false) +
-    sect('월별', s.byMonth, false) +
-    sect('가격대별', s.byPrice, false) +
+    '<div class="stat-hint">숫자나 그래프를 누르면 해당 와인 목록을 볼 수 있어요</div>' +
+    '<div class="sect">종류별</div>' + statPieHtml('종류별', sortedEntries(s.byType), function (k) { return typeStyle(k).c; }) +
+    '<div class="sect">가격대별</div>' + statPieHtml('가격대별', priceEntries, function (k) { return PRICE_COLORS[k]; }) +
+    '<div class="sect">품종별 <span class="sect-note">블렌드는 품종마다 한 번씩 세요</span></div>' +
+    statBarsHtml('품종별', sortedEntries(s.byGrape), 'var(--wine)') +
+    '<div class="sect">월별</div>' + statBarsHtml('월별', monthEntries, 'var(--wine)') +
     repeatHistoryHtml(computeRepeatHistory(ALL_WINES)) +
     '<div style="text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--sub)">' +
     '🍷 ' + esc(ME) + ' 셀러</div>';
