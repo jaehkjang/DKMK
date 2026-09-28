@@ -157,6 +157,11 @@
     <div data-p="Stat" onclick="showPage('Stat')"><span class="ic">📊</span>기록</div>
   </nav>
 
+  <!-- 기록 탭에서 통계 항목을 눌렀을 때 뜨는 와인 목록. 여기서 와인을 누르면 상세가 그 위로 떠야 해서 detailModal보다 앞에 둔다 -->
+  <div class="modal-bg" id="statListModal" onclick="if(event.target===this) cm('statListModal')">
+    <div class="modal"><div class="grip"></div><div id="statListBody"></div></div>
+  </div>
+
   <div class="modal-bg" id="detailModal" onclick="if(event.target===this) cm('detailModal')">
     <div class="modal"><div class="grip"></div><div id="detailBody"></div></div>
   </div>
