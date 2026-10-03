@@ -41,7 +41,8 @@ var FOOD_MENU = [
   { label: '일식', icon: '🍣', children: ['숙성회'] },
   { label: '이탈리안', icon: '🍝', children: ['페페로니피자', '미트피자', '오일파스타', '토마토해산물파스타', '명란파스타', '라구파스타'] },
   { label: '아시안', icon: '🍛', children: ['카오팟무', '타코', '부리또', '화이타(새우)', '화이타(돼지고기)', '화이타(소고기)'] },
-  { label: '스테이크', icon: '🥩', children: ['등심', '안심', '채끝살'] }
+  { label: '스테이크', icon: '🥩', children: ['등심', '안심', '채끝살'] },
+  { label: '아메리칸', icon: '🍔', children: ['햄버거'] }
 ];
 var ACTIVE_FOOD_CAT = FOOD_MENU[0].label;
 var SELECTED_FOODS = [];
