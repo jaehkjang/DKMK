@@ -396,23 +396,61 @@ function fallbackCopy(text, done) {
 }
 
 /**
- * 저장된 토큰이 아직 유효한지 확인하고 앱을 연다. 확인이 끝나기 전엔
- * 로그인 입력창 대신 "불러오는 중…"만 보여준다 — 어차피 자동 로그인될
- * 화면에서 아이디/비번 입력창이 잠깐 번쩍이는 게 지저분해서.
+ * 와인 목록을 이 기기에 저장해 두는 캐시. 앱을 열 때 서버 응답(Apps Script는 한 번에
+ * 1~3초씩 걸린다)을 기다리지 않고 지난번 목록부터 바로 그리고, 서버에서 최신 목록이
+ * 오면 조용히 바꿔 그린다. 토큰과 묶어 저장해서 다른 셀러로 들어가면 쓰지 않고,
+ * 로그아웃하면 지운다.
+ */
+var WINES_CACHE_KEY = 'dkmk_wines_cache';
+function saveWinesCache() {
+  try {
+    localStorage.setItem(WINES_CACHE_KEY, JSON.stringify({ token: TOKEN, me: ME, admin: IS_ADMIN, wines: ALL_WINES }));
+  } catch (e) { /* 저장 공간이 없거나 막힌 환경이면 캐시 없이 동작 */ }
+}
+function readWinesCache() {
+  try {
+    var c = JSON.parse(localStorage.getItem(WINES_CACHE_KEY) || 'null');
+    if (c && c.token === TOKEN && Array.isArray(c.wines)) return c;
+  } catch (e) { /* 깨진 캐시는 무시 */ }
+  return null;
+}
+function clearWinesCache() {
+  try { localStorage.removeItem(WINES_CACHE_KEY); } catch (e) { /* 무시 */ }
+}
+
+/**
+ * 저장된 토큰으로 앱을 연다. 예전엔 토큰 확인 → 목록 조회를 차례로 기다려서 서버를
+ * 두 번 왕복할 때까지 빈 화면이었는데, 지금은
+ *  1) 이 기기에 저장해 둔 목록이 있으면 그걸로 바로 화면을 열고
+ *  2) 토큰 확인과 목록 조회를 동시에 보낸다.
+ * 토큰이 무효면 둘 중 먼저 오는 쪽에서 로그인 화면으로 돌아간다(목록 조회도 같은 토큰
+ * 검사를 거치므로 남의 데이터가 섞일 일은 없다). 저장된 목록이 없을 때만 확인이 끝날 때까지
+ * 로그인 입력창 대신 "불러오는 중…"을 보여준다.
  */
 function bootstrap() {
   TOKEN = API.loadToken();
   if (!TOKEN) { showAuthForm(); return; }
+  var cached = readWinesCache();
+  if (cached) {
+    ME = cached.me || ''; IS_ADMIN = !!cached.admin;
+    ALL_WINES = cached.wines; WINES_LOADED = true;
+    document.getElementById('pinScreen').style.display = 'none';
+    renderList();
+  }
   callAPI(function () { return API.checkToken(); }).then(function (res) {
     if (res && res.ok) {
       ME = res.name; IS_ADMIN = !!res.isAdmin;
       AUTH_RECOVERY_SHOWN = false;
       document.getElementById('pinScreen').style.display = 'none';
-      load();
+      if (WINES_LOADED) saveWinesCache();
+    } else if (cached && res && res.error) {
+      // 인터넷이 잠깐 끊긴 것뿐이면 로그아웃시키지 않고 저장된 목록을 계속 보여준다
+      toast(res.error);
     } else {
       logout('다시 들어와주세요');
     }
   });
+  load();
 }
 
 function showAuthForm() {
@@ -437,6 +475,8 @@ function logout(msg) {
   API.setToken('');
   TOKEN = ''; ME = ''; IS_ADMIN = false;
   WINES_LOADED = false; ALL_WINES = [];
+  clearWinesCache();
+  FOOD_REQUIRED_HTML = '';
   GLASSES_LOADED = false; MY_GLASSES = [];
   document.querySelectorAll('.modal-bg').forEach(function (m) { m.classList.remove('on'); });
   document.getElementById('pinScreen').style.display = '';
@@ -485,11 +525,13 @@ function showPage(p) {
  * "안주없이 마실 와인 추천받기"의 반대. 서버에서 셀러 구성이 그대로면 캐시로
  * 바로 돌려주기 때문에, Food 탭에 들어올 때마다 매번 AI를 새로 부르지는 않는다.
  */
+var FOOD_REQUIRED_HTML = ''; // 지난번 결과 — 탭에 다시 들어오면 이걸 먼저 보여주고 뒤에서 새로 받는다
 function renderFoodRequired() {
   var area = document.getElementById('foodRequiredArea');
-  area.innerHTML = '<div class="loading">🍷 고르는 중…</div>';
+  area.innerHTML = FOOD_REQUIRED_HTML || '<div class="loading">🍷 고르는 중…</div>';
   callAPI(function () { return API.recommendFoodRequired(); }).then(function (res) {
     if (!res || res.error) {
+      if (FOOD_REQUIRED_HTML) return; // 지난번 결과를 보여주는 중이면 그대로 둔다
       area.innerHTML = '<div class="empty"><span class="big">😵</span>' + esc(res && res.error) + '</div>';
       return;
     }
@@ -501,16 +543,21 @@ function renderFoodRequired() {
           return cardHtml(x.wine, reason);
         }).join('')
       : '<div class="empty"><span class="big">🍇</span>지금 셀러엔<br>그런 와인이 없어요</div>';
+    FOOD_REQUIRED_HTML = area.innerHTML;
   });
 }
 
 function load() {
+  var token = TOKEN;
   callAPI(function () { return API.getWines(); }).then(function (d) {
+    if (token !== TOKEN) return; // 그 사이 로그아웃했거나 다른 셀러로 들어갔으면 버린다
     if (!d || d.error) {
+      // 이미 보여주고 있는 목록(저장된 목록 포함)이 있으면 지우지 않고 알림만 띄운다
+      if (WINES_LOADED) { toast('최신 목록을 못 불러왔어요: ' + ((d && d.error) || '')); return; }
       document.getElementById('listArea').innerHTML = '<div class="empty"><span class="big">😵</span>불러오지 못했어요<br>' + esc(d && d.error) + '</div>';
       return;
     }
-    ALL_WINES = d.wines; WINES_LOADED = true; renderList();
+    ALL_WINES = d.wines; WINES_LOADED = true; saveWinesCache(); renderList();
     // 기록 탭 목록에서 와인을 되돌리거나 고친 경우, 통계와 열려 있던 목록이 옛 데이터로 남지 않게
     if (document.getElementById('pgStat').classList.contains('on')) {
       cm('statListModal'); renderStats(); renderDrunkList();
@@ -661,7 +708,7 @@ function cardHtml(w, extraHtml) {
       '<button class="undo-btn" onclick="event.stopPropagation();doUnmark(' + w.rowIndex + ')">되돌리기</button>'
     : '<span></span><button class="drink-btn" onclick="event.stopPropagation();openDrinkModal(' + w.rowIndex + ')">마시기</button>';
 
-  var thumb = w['라벨사진'] ? '<img class="card-thumb" src="' + esc(w['라벨사진']) + '" alt="">' : '';
+  var thumb = w['라벨사진'] ? '<img class="card-thumb" src="' + esc(w['라벨사진']) + '" alt="" loading="lazy" decoding="async">' : '';
 
   return '<div class="card' + (isDrunk ? ' dim' : '') + '" style="--c:' + t.c + ';--c-soft:' + t.s + '" onclick="openDetail(' + w.rowIndex + ')">' +
     '<div class="card-head">' + thumb +

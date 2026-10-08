@@ -728,12 +728,13 @@ function deleteUserAccount(token, targetId) {
 /** 내 와인 목록만 조회 */
 function getWines(token) {
   var me = String(requireUser_(token)['아이디']);
-  var sheet = getSheet_();
-  var lastRow = sheet.getLastRow();
-  var headers = getHeaders_();
-  if (lastRow < 2) return { headers: headers, wines: [] };
+  // 헤더와 데이터를 한 번에 읽는다 — 시트 읽기는 호출 한 번마다 시간이 꽤 들어서,
+  // 예전처럼 헤더 따로·데이터 따로 읽던 것보다 목록이 빨리 나온다
+  var all = getSheet_().getDataRange().getValues();
+  var headers = all[0] || [];
+  if (all.length < 2) return { headers: headers, wines: [] };
 
-  var values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  var values = all.slice(1);
   var ownerIdx = headers.indexOf(OWNER_COLUMN);
   var tz = Session.getScriptTimeZone() || 'Asia/Seoul';
   var wines = [];
