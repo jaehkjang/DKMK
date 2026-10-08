@@ -225,14 +225,7 @@
     box-shadow:0 6px 18px rgba(0,0,0,.3); cursor:pointer;
     }
     .fab b { font-size:22px; line-height:1; color:#F2C46B; }
-    #listArea { padding-bottom:72px; } /* 떠 있는 버튼이 맨 아래 카드의 "마시기"를 가리지 않게 */
-    /* 기록 탭 "마신 와인" 칸 위의 기록 버튼 — 셀러의 떠 있는 버튼과 일부러 모양을 다르게 */
-    .drunk-add {
-    display:flex; align-items:center; justify-content:center; gap:8px; width:100%; margin:0 0 14px; padding:15px;
-    border:1.5px dashed #C9A9B0; border-radius:14px; background:var(--wine-soft); color:var(--wine);
-    font:inherit; font-size:15px; font-weight:800; cursor:pointer;
-    }
-    .drunk-add b { font-size:20px; }
+    #listArea, #statArea, #drunkListArea { padding-bottom:72px; } /* 떠 있는 버튼이 맨 아래 카드의 "마시기"를 가리지 않게 */
     .add-modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
     .add-modal-head h3 { margin:0; }
     .add-close { border:0; background:none; font-size:22px; color:var(--sub); padding:4px 6px; cursor:pointer; }
