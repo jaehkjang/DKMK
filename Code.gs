@@ -781,7 +781,7 @@ function assertRowStillMatches_(sheet, headers, rowIndex, expectedName) {
   }
 }
 
-/** 새 와인 추가 (상태=보유, 등록일=오늘 자동). photoDataUrl은 선택. */
+/** 새 와인 추가 (상태=보유, 등록일=오늘 자동). photoDataUrl은 선택. 추가된 행 번호를 돌려준다. */
 function addWine(token, data, photoDataUrl) {
   var me = String(requireUser_(token)['아이디']);
   var sheet = getSheet_();
@@ -796,7 +796,8 @@ function addWine(token, data, photoDataUrl) {
     return (data && data[h]) || '';
   });
   sheet.appendRow(row);
-  return { ok: true };
+  // 새 행 번호 — 기록 탭에서 마신 와인을 바로 추가할 때 이어서 markDrunk를 부르는 데 쓴다
+  return { ok: true, rowIndex: sheet.getLastRow() };
 }
 
 /** 잘못 등록된 정보를 고칠 수 있는 필드. 상태/등록일/마신날짜/소유자처럼
