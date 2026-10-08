@@ -53,10 +53,73 @@
     <div id="pgCellar" class="page on">
       <div class="seg" id="cellarSeg">
         <div class="on" data-s="보유" onclick="setSeg('보유')">보유</div>
-        <div data-s="마심" onclick="setSeg('마심')">마신 와인</div>
+        <div data-s="추가" onclick="setSeg('추가')">추가</div>
       </div>
-      <div class="search"><input id="search" placeholder="와인 이름, 품종…" oninput="renderList()"></div>
-      <div id="listArea"><div class="loading">불러오는 중…</div></div>
+      <div id="cellarListPane">
+        <div class="search"><input id="search" placeholder="와인 이름, 품종…" oninput="renderList()"></div>
+        <div id="listArea"><div class="loading">불러오는 중…</div></div>
+      </div>
+      <!-- 추가 화면(#addPane)은 셀러·기록 탭이 같이 쓴다. 지금 보고 있는 탭의 자리로 옮겨 붙인다 -->
+      <div id="cellarAddSlot">
+        <div id="addPane" style="display:none">
+          <div class="shoot">
+            <label for="photoOne">
+              <span class="ic">🍾</span>
+              <span class="t">라벨 찍기</span>
+              <span class="s">한 병</span>
+              <input type="file" id="photoOne" accept="image/*" onchange="onPhoto(event,'one')">
+            </label>
+            <label for="photoAll" id="photoAllLabel">
+              <span class="ic">📸</span>
+              <span class="t">셀러 찍기</span>
+              <span class="s">여러 병 한번에</span>
+              <input type="file" id="photoAll" accept="image/*" onchange="onPhoto(event,'all')">
+            </label>
+          </div>
+
+          <div id="photoPreview"></div>
+          <div id="photoNote"></div>
+
+          <!-- 셀러 인식 결과 선택 -->
+          <div id="pickArea" style="display:none;">
+            <div id="pickList"></div>
+            <button class="primary-btn" id="pickBtn" onclick="addPicked()">담기</button>
+            <button class="more-toggle" onclick="cancelPick()">취소</button>
+          </div>
+
+          <!-- 직접 입력 폼 -->
+          <form id="addForm" onsubmit="submitAdd(event)">
+            <div class="field big"><input id="f_와인명" placeholder="와인 이름" required></div>
+            <div id="editRatingBox" style="display:none;margin-bottom:12px">
+              <div style="font-size:13px;font-weight:800;color:var(--sub);margin-bottom:6px">평점</div>
+              <div class="star-pick" id="editStarPick" style="justify-content:flex-start;margin:0;font-size:32px"></div>
+            </div>
+            <div class="chips" id="typeChips"></div>
+            <div class="duo">
+              <div class="field"><input id="f_품종" placeholder="품종" oninput="checkSimilar()"></div>
+              <div class="field"><input id="f_빈티지" placeholder="빈티지"></div>
+            </div>
+            <div class="field"><input id="f_생산지/국가" placeholder="생산지 / 국가"></div>
+            <div id="similarHint"></div>
+            <div class="duo">
+              <div class="field"><input id="f_구매처" placeholder="구매처 (예: 이마트, 와인샵)"></div>
+              <div class="field"><input id="f_구매가격" placeholder="구매가격 (원)" inputmode="numeric"></div>
+            </div>
+            <div class="field"><textarea id="f_메모" placeholder="메모"></textarea></div>
+
+            <div id="addDrinkBox" style="display:none">
+              <div style="font-size:13px;font-weight:800;color:var(--sub);margin:4px 0 6px">평점</div>
+              <div class="star-pick" id="addStarPick" style="justify-content:flex-start;margin:0 0 12px;font-size:32px"></div>
+              <div class="field"><textarea id="addDrinkComment" placeholder="어땠어요?"></textarea></div>
+              <div class="field"><input id="addDrinkFood" placeholder="뭐랑 드셨어요?"></div>
+              <div style="font-size:13px;font-weight:800;color:var(--sub);margin:4px 0 8px">다시 살 것 같아요?</div>
+              <div class="chips" id="addRepurchaseChips"></div>
+            </div>
+
+            <button class="primary-btn" id="addBtn" type="submit">셀러에 넣기</button>
+          </form>
+        </div>
+      </div>
     </div>
 
     <!-- 페어링 추천 -->
@@ -93,67 +156,27 @@
 
     </div>
 
-    <!-- 추가 -->
-    <div id="pgAdd" class="page">
-      <div class="shoot">
-        <label for="photoOne">
-          <span class="ic">🍾</span>
-          <span class="t">라벨 찍기</span>
-          <span class="s">한 병</span>
-          <input type="file" id="photoOne" accept="image/*" onchange="onPhoto(event,'one')">
-        </label>
-        <label for="photoAll">
-          <span class="ic">📸</span>
-          <span class="t">셀러 찍기</span>
-          <span class="s">여러 병 한번에</span>
-          <input type="file" id="photoAll" accept="image/*" onchange="onPhoto(event,'all')">
-        </label>
-      </div>
-
-      <div id="photoPreview"></div>
-      <div id="photoNote"></div>
-
-      <!-- 셀러 인식 결과 선택 -->
-      <div id="pickArea" style="display:none;">
-        <div id="pickList"></div>
-        <button class="primary-btn" id="pickBtn" onclick="addPicked()">담기</button>
-        <button class="more-toggle" onclick="cancelPick()">취소</button>
-      </div>
-
-      <!-- 직접 입력 폼 -->
-      <form id="addForm" onsubmit="submitAdd(event)">
-        <div class="field big"><input id="f_와인명" placeholder="와인 이름" required></div>
-        <div id="editRatingBox" style="display:none;margin-bottom:12px">
-          <div style="font-size:13px;font-weight:800;color:var(--sub);margin-bottom:6px">평점</div>
-          <div class="star-pick" id="editStarPick" style="justify-content:flex-start;margin:0;font-size:32px"></div>
-        </div>
-        <div class="chips" id="typeChips"></div>
-        <div class="duo">
-          <div class="field"><input id="f_품종" placeholder="품종" oninput="checkSimilar()"></div>
-          <div class="field"><input id="f_빈티지" placeholder="빈티지"></div>
-        </div>
-        <div class="field"><input id="f_생산지/국가" placeholder="생산지 / 국가"></div>
-        <div id="similarHint"></div>
-        <div class="duo">
-          <div class="field"><input id="f_구매처" placeholder="구매처 (예: 이마트, 와인샵)"></div>
-          <div class="field"><input id="f_구매가격" placeholder="구매가격 (원)" inputmode="numeric"></div>
-        </div>
-        <div class="field"><textarea id="f_메모" placeholder="메모"></textarea></div>
-
-        <button class="primary-btn" id="addBtn" type="submit">셀러에 넣기</button>
-      </form>
-    </div>
-
     <!-- 기록 -->
     <div id="pgStat" class="page">
-      <div id="statArea"><div class="loading">불러오는 중…</div></div>
+      <div class="seg" id="statSeg">
+        <div class="on" data-s="통계" onclick="setStatSeg('통계')">통계</div>
+        <div data-s="마심" onclick="setStatSeg('마심')">마신 와인</div>
+        <div data-s="추가" onclick="setStatSeg('추가')">추가</div>
+      </div>
+      <div id="statPane">
+        <div id="statArea"><div class="loading">불러오는 중…</div></div>
+      </div>
+      <div id="drunkPane" style="display:none">
+        <div class="search"><input id="drunkSearch" placeholder="와인 이름, 품종…" oninput="renderDrunkList()"></div>
+        <div id="drunkListArea"><div class="loading">불러오는 중…</div></div>
+      </div>
+      <div id="statAddSlot"></div>
     </div>
   </main>
 
   <nav id="tabbar">
     <div class="on" data-p="Cellar" onclick="showPage('Cellar')"><span class="ic">🍷</span>셀러</div>
     <div data-p="Food" onclick="showPage('Food')"><span class="ic">🍽️</span>페어링 추천</div>
-    <div data-p="Add" onclick="goAddFresh()"><span class="ic">📸</span>추가</div>
     <div data-p="Stat" onclick="showPage('Stat')"><span class="ic">📊</span>기록</div>
   </nav>
 
@@ -217,11 +240,11 @@
       <h3>🍷 이용법</h3>
       <div class="help-body">
         <ol>
-          <li><b>와인 추가</b> — 하단 "추가" 탭의 라벨 찍기 버튼을 눌러 사진을 찍으면 이름·품종·생산지가 자동으로 인식돼요.</li>
+          <li><b>와인 추가</b> — 셀러 탭의 "추가" 칸에서 라벨 찍기 버튼을 눌러 사진을 찍으면 이름·품종·생산지가 자동으로 인식돼요.</li>
           <li><b>와인 정보 확인</b> — 셀러 목록에서 와인을 누르면 서빙 온도, 어울리는 잔, 어울리는 음식이 자동으로 채워져 나와요.</li>
           <li><b>페어링 추천</b> — 페어링 추천 탭에서 먹고 싶은 음식을 고르면 어울리는 와인을 찾아줘요. 음식 없이 오늘 그냥 마시기 좋은 와인만 추천받을 수도 있고, 반대로 음식과 함께 마셔야 진짜 매력이 나오는 와인만 모아볼 수도 있어요.</li>
-          <li><b>마시기 기록</b> — 와인을 마셨으면 "마시기" 버튼으로 별점·한줄평·재구매 의향을 남겨요.</li>
-          <li><b>기록 보기</b> — 기록 탭에서 지금까지 마신 와인 통계와, 같은 와인을 여러 번 마셨을 때의 평점 변화를 볼 수 있어요.</li>
+          <li><b>마시기 기록</b> — 와인을 마셨으면 "마시기" 버튼으로 별점·한줄평·재구매 의향을 남겨요. 셀러에 없던 와인을 밖에서 마셨다면 기록 탭의 "추가" 칸에서 바로 마신 와인으로 남길 수 있어요.</li>
+          <li><b>기록 보기</b> — 기록 탭에서 지금까지 마신 와인 통계와 마신 와인 목록, 같은 와인을 여러 번 마셨을 때의 평점 변화를 볼 수 있어요.</li>
           <li><b>설정</b> — 비밀번호 변경, 내가 가진 잔 등록, 기존 와인 정보 한번에 채우기, 홈 화면에 추가/공유를 할 수 있어요.</li>
         </ol>
       </div>
