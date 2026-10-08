@@ -569,7 +569,7 @@ function load() {
 /**
  * 셀러 탭은 보유 와인 목록만, 기록 탭은 "통계 | 마신 와인" 두 칸.
  * 와인 추가는 탭 안의 칸이 아니라 따로 뜨는 창(#addModal)에서 한다 — 셀러는 떠 있는
- * "＋ 와인 추가" 버튼, 기록은 마신 와인 칸 위의 "＋ 마신 와인 기록하기" 버튼으로 연다.
+ * "＋ 와인 추가" 버튼, 기록은 (통계·마신 와인 어느 칸이든) 떠 있는 "＋ 마신 와인 기록" 버튼으로 연다.
  */
 /** 와인을 담은 직후엔 방금 담은 게 보이는 셀러 목록으로 */
 function goCellarOwned() { showPage('Cellar'); }
@@ -637,7 +637,7 @@ function renderDrunkList() {
   if (!list.length) {
     area.innerHTML = q
       ? '<div class="empty"><span class="big">🔍</span>찾는 와인이 없어요</div>'
-      : '<div class="empty"><span class="big">🥂</span>아직 마신 기록이 없어요<br>위의 <b>＋ 마신 와인 기록하기</b>로 남겨보세요</div>';
+      : '<div class="empty"><span class="big">🥂</span>아직 마신 기록이 없어요<br><b>＋ 마신 와인 기록</b>을 눌러 남겨보세요</div>';
     return;
   }
   area.innerHTML = list.map(function (w) { return cardHtml(w); }).join('');
