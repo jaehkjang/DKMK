@@ -214,6 +214,29 @@
     .pick .sb { font-size:12px; color:var(--sub); margin-top:3px; }
     .pick.dup { opacity:.55; }
 
+    /* ---------- 와인 추가 버튼 ---------- */
+    /* 셀러 목록 위에 떠 있는 버튼. 카드의 "마시기"(와인색)와 헷갈리지 않게 진한 갈색으로 칠한다.
+       앱 화면 폭이 480px로 제한돼 있어서, 넓은 화면에서도 앱 오른쪽 끝에 붙도록 위치를 계산한다 */
+    .fab {
+    position:fixed; z-index:20; right:max(18px, calc(50% - 222px));
+    bottom:calc(74px + env(safe-area-inset-bottom));
+    display:flex; align-items:center; gap:6px; border:0; border-radius:28px; padding:14px 20px;
+    background:var(--tx); color:#fff; font:inherit; font-size:15px; font-weight:800;
+    box-shadow:0 6px 18px rgba(0,0,0,.3); cursor:pointer;
+    }
+    .fab b { font-size:22px; line-height:1; color:#F2C46B; }
+    #listArea { padding-bottom:72px; } /* 떠 있는 버튼이 맨 아래 카드의 "마시기"를 가리지 않게 */
+    /* 기록 탭 "마신 와인" 칸 위의 기록 버튼 — 셀러의 떠 있는 버튼과 일부러 모양을 다르게 */
+    .drunk-add {
+    display:flex; align-items:center; justify-content:center; gap:8px; width:100%; margin:0 0 14px; padding:15px;
+    border:1.5px dashed #C9A9B0; border-radius:14px; background:var(--wine-soft); color:var(--wine);
+    font:inherit; font-size:15px; font-weight:800; cursor:pointer;
+    }
+    .drunk-add b { font-size:20px; }
+    .add-modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .add-modal-head h3 { margin:0; }
+    .add-close { border:0; background:none; font-size:22px; color:var(--sub); padding:4px 6px; cursor:pointer; }
+
     /* ---------- 모달 ---------- */
     .modal-bg { position:fixed; top:0; right:0; bottom:0; left:0; background:rgba(46,42,38,.45); display:none; align-items:flex-end; z-index:50; }
     .modal-bg.on { display:flex; }

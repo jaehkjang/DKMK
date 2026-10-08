@@ -4,7 +4,7 @@
 // 서버와 주고받는 코드 자체는 api.js에만 있습니다.
 // ============================================================
 
-var ALL_WINES = [], SEG = '보유', STAT_SEG = '통계', PENDING_ROW = null, CURRENT_RATING = 5;
+var ALL_WINES = [], STAT_SEG = '통계', PENDING_ROW = null, CURRENT_RATING = 5;
 var PHOTO_DATAURL = null, PHOTO_UPLOADED_URL = null, PICKS = [], PICK_ON = {}, SELECTED_TYPE = '';
 var TOKEN = '', ME = '', EDIT_ROW = null, DETAIL_ROW = null, IS_ADMIN = false;
 // 수정 폼을 열 때 보고 있던 와인명 — 그 사이 다른 사람이 셀러를 바꿔서 행 번호가
@@ -471,7 +471,7 @@ function showPage(p) {
   // 하고, 그 뒤에 곧바로 서버에서 다시 불러와 조용히 최신 상태로 맞춘다 — 같은 아이디를
   // 여러 사람이 같이 쓸 때, 다른 사람이 그 사이 지우거나 바꾼 게 셀러 탭을 열 때마다
   // 반드시 반영되게 하려는 것(캐시만 믿고 안 부르면 그 변화가 영영 안 보일 수 있다).
-  if (p === 'Cellar') { syncCellarSeg(); if (WINES_LOADED) renderList(); load(); }
+  if (p === 'Cellar') { if (WINES_LOADED) renderList(); load(); }
   if (p === 'Stat') { syncStatSeg(); if (WINES_LOADED) { loadStats(); load(); } else loadStats(); }
   if (p === 'Food') {
     renderCellarPairingChips();
@@ -520,55 +520,23 @@ function load() {
 
 /* ---------- 목록 ---------- */
 /**
- * 셀러 탭은 "보유 | 추가", 기록 탭은 "통계 | 마신 와인 | 추가"로 나뉜다.
- * 추가 화면(#addPane)은 하나만 두고 두 탭이 같이 쓴다 — 지금 보는 탭의 자리로 옮겨
- * 붙이고, 기록 탭에서 열면 "마신 와인으로 바로 기록" 모드(ADD_MODE='마심')가 된다.
+ * 셀러 탭은 보유 와인 목록만, 기록 탭은 "통계 | 마신 와인" 두 칸.
+ * 와인 추가는 탭 안의 칸이 아니라 따로 뜨는 창(#addModal)에서 한다 — 셀러는 떠 있는
+ * "＋ 와인 추가" 버튼, 기록은 마신 와인 칸 위의 "＋ 마신 와인 기록하기" 버튼으로 연다.
  */
-function setSeg(v) {
-  // 추가 칸을 직접 눌렀을 때 수정 모드가 남아있으면 새 등록으로 초기화
-  if (v === '추가' && (EDIT_ROW !== null || ADD_MODE !== '보유')) resetAddForm();
-  SEG = v;
-  syncCellarSeg();
-  window.scrollTo(0, 0);
-}
-function syncCellarSeg() {
-  document.querySelectorAll('#cellarSeg > div').forEach(function (d) { d.classList.toggle('on', d.dataset.s === SEG); });
-  var adding = SEG === '추가';
-  document.getElementById('cellarListPane').style.display = adding ? 'none' : '';
-  if (adding) mountAddPane('cellarAddSlot', '보유');
-  else if (document.getElementById('cellarAddSlot').contains(document.getElementById('addPane'))) {
-    document.getElementById('addPane').style.display = 'none';
-  }
-  if (document.getElementById('pgCellar').classList.contains('on')) {
-    document.getElementById('pgTitle').textContent = adding ? (EDIT_ROW !== null ? '와인 수정' : '와인 추가') : '셀러';
-    document.getElementById('pgCount').textContent = '';
-    if (!adding && WINES_LOADED) renderList();
-  }
-}
-function goCellarSeg(seg) {
-  SEG = seg;
-  showPage('Cellar');
-}
-/** 와인을 담은 직후엔 방금 담은 게 보이는 보유 칸으로 */
-function goCellarOwned() { goCellarSeg('보유'); }
+/** 와인을 담은 직후엔 방금 담은 게 보이는 셀러 목록으로 */
+function goCellarOwned() { showPage('Cellar'); }
 
 function setStatSeg(v) {
-  if (v === '추가' && (EDIT_ROW !== null || ADD_MODE !== '마심')) resetAddForm();
   STAT_SEG = v;
   syncStatSeg();
   window.scrollTo(0, 0);
 }
 function syncStatSeg() {
   document.querySelectorAll('#statSeg > div').forEach(function (d) { d.classList.toggle('on', d.dataset.s === STAT_SEG); });
-  var adding = STAT_SEG === '추가';
   document.getElementById('statPane').style.display = STAT_SEG === '통계' ? '' : 'none';
   document.getElementById('drunkPane').style.display = STAT_SEG === '마심' ? '' : 'none';
-  if (adding) mountAddPane('statAddSlot', '마심');
-  else if (document.getElementById('statAddSlot').contains(document.getElementById('addPane'))) {
-    document.getElementById('addPane').style.display = 'none';
-  }
   if (document.getElementById('pgStat').classList.contains('on')) {
-    document.getElementById('pgTitle').textContent = adding ? (EDIT_ROW !== null ? '와인 수정' : '마신 와인 추가') : '기록';
     document.getElementById('pgCount').textContent = '';
     if (STAT_SEG === '마심') renderDrunkList();
   }
@@ -585,7 +553,6 @@ function wineMatches(w, q) {
 
 /** 셀러 탭 "보유" 칸 목록 */
 function renderList() {
-  if (SEG !== '보유') return;
   var q = (document.getElementById('search').value || '').trim().toLowerCase();
   var list = ALL_WINES.filter(function (w) {
     return (w['상태'] || '보유') === '보유' && wineMatches(w, q);
@@ -600,7 +567,7 @@ function renderList() {
   if (!list.length) {
     area.innerHTML = q
       ? '<div class="empty"><span class="big">🔍</span>찾는 와인이 없어요</div>'
-      : '<div class="empty"><span class="big">🍷</span>셀러가 비어 있어요<br>위의 <b>추가</b>에서 사진을 찍어보세요</div>';
+      : '<div class="empty"><span class="big">🍷</span>셀러가 비어 있어요<br><b>＋ 와인 추가</b>를 눌러 사진을 찍어보세요</div>';
     return;
   }
   // map이 index를 두 번째 인자로 넘기지 않도록 감싼다(extraHtml 자리)
@@ -623,7 +590,7 @@ function renderDrunkList() {
   if (!list.length) {
     area.innerHTML = q
       ? '<div class="empty"><span class="big">🔍</span>찾는 와인이 없어요</div>'
-      : '<div class="empty"><span class="big">🥂</span>아직 마신 기록이 없어요<br>위의 <b>추가</b>에서 마신 와인을 남겨보세요</div>';
+      : '<div class="empty"><span class="big">🥂</span>아직 마신 기록이 없어요<br>위의 <b>＋ 마신 와인 기록하기</b>로 남겨보세요</div>';
     return;
   }
   area.innerHTML = list.map(function (w) { return cardHtml(w); }).join('');
@@ -941,38 +908,42 @@ function startEdit(r) {
   document.getElementById('editRatingBox').style.display = isDrunk ? '' : 'none';
   if (isDrunk) { EDIT_RATING = parseInt(w['평점'], 10) || 0; renderEditStars(); }
 
-  // 마신 와인은 기록 탭의 추가 칸에서, 보유 와인은 셀러 탭의 추가 칸에서 고친다
-  EDIT_MODE = isDrunk ? '마심' : '보유';
-  if (isDrunk) goStatSeg('추가'); else goCellarSeg('추가');
+  ADD_MODE = isDrunk ? '마심' : '보유';
+  showAddModal();
 }
 
 /**
- * 추가 화면을 셀러/기록 탭 중 지금 보는 쪽 자리로 옮기고 모드를 맞춘다.
- * mode '보유' = 셀러에 넣기, '마심' = 마신 와인으로 바로 기록(평점·한줄평 등 같이 받음).
+ * 와인 추가 창. mode '보유' = 셀러에 넣기(셀러 탭의 떠 있는 버튼),
+ * '마심' = 셀러에 없던 와인을 바로 마신 와인으로 기록(기록 탭의 버튼, 평점·한줄평 등 같이 받음).
+ * 같은 모드로 다시 열면 쓰다 만 내용은 그대로 두고, 수정 중이었거나 모드가 바뀌면 새 폼으로 연다.
  */
 var ADD_MODE = '보유';
-var EDIT_MODE = ''; // 수정 중인 와인이 어느 탭(보유/마심) 소속인지
-function mountAddPane(slotId, mode) {
-  var pane = document.getElementById('addPane');
-  var slot = document.getElementById(slotId);
-  if (pane.parentNode !== slot) slot.appendChild(pane);
-  pane.style.display = '';
-  ADD_MODE = mode;
-  // 한쪽 탭에서 수정하다가 다른 탭의 추가 칸으로 오면 수정은 접고 새 등록 폼으로
-  if (EDIT_ROW !== null && EDIT_MODE !== mode) resetAddForm();
-  var drunkMode = mode === '마심';
+function openAdd(mode) {
+  if (EDIT_ROW !== null || ADD_MODE !== mode) { ADD_MODE = mode; resetAddForm(); }
+  showAddModal();
+}
+/** 지금 모드(ADD_MODE)와 수정 여부(EDIT_ROW)에 맞춰 창 모양을 맞추고 연다 */
+function showAddModal() {
+  var drunkMode = ADD_MODE === '마심';
   var editing = EDIT_ROW !== null;
+  document.getElementById('addModalTitle').textContent = editing ? '와인 수정' : (drunkMode ? '마신 와인 기록' : '와인 추가');
   // 여러 병 한번에 찍기는 셀러에 담을 때만 쓴다
   document.getElementById('photoAllLabel').style.display = drunkMode ? 'none' : '';
   if (drunkMode && document.getElementById('pickArea').style.display !== 'none') cancelPick();
   document.getElementById('addDrinkBox').style.display = (drunkMode && !editing) ? '' : 'none';
   if (drunkMode && !editing) { renderAddStars(); renderAddRepurchaseChips(); }
   if (!editing) document.getElementById('addBtn').textContent = drunkMode ? '마신 와인 기록하기' : '셀러에 넣기';
+  om('addModal');
+  document.querySelector('#addModal .modal').scrollTop = 0;
+}
+/** 창 닫기. 수정하다 닫았으면 다음에 "추가"를 열 때 그 와인이 남아있지 않게 비운다 */
+function closeAdd() {
+  cm('addModal');
+  if (EDIT_ROW !== null) resetAddForm();
 }
 
 function resetAddForm() {
   EDIT_ROW = null;
-  EDIT_MODE = '';
   EDIT_ORIG_NAME = '';
   document.querySelectorAll('#addForm input, #addForm textarea').forEach(function (el) { el.value = ''; });
   document.querySelectorAll('#typeChips button').forEach(function (x) { x.classList.remove('on'); });
@@ -1291,7 +1262,7 @@ function addPicked() {
   callAPI(function () { return API.addWines(sel); }).then(function (r) {
     if (!r || r.error) { toast('실패: ' + ((r && r.error) || '')); btn.disabled = false; renderPicks(); return; }
     toast(r.added + '병 담았어요 🍾');
-    cancelPick(); goCellarOwned();
+    cancelPick(); cm('addModal'); goCellarOwned();
   });
 }
 
@@ -1344,6 +1315,7 @@ function submitAdd(e) {
       return;
     }
     toast(editing ? '수정했어요' : '셀러에 담았어요 🍾');
+    cm('addModal');
     resetAddForm();
     btn.disabled = false;
     // 마신 와인을 수정했으면 기록 탭 "마신 와인" 칸으로, 새로 담았거나 보유 와인을 고쳤으면
@@ -1393,6 +1365,7 @@ function submitAddDrunk(data, photo) {
     return callAPI(function () { return API.markDrunk(row, info); }).then(function (r) {
       if (!r || r.error) { fail((r && r.error) || '셀러에는 담겼는데 마신 기록을 못 남겼어요'); load(); return; }
       toast('기록했어요 🍷');
+      cm('addModal');
       resetAddForm();
       btn.disabled = false;
       goStatSeg('마심');
