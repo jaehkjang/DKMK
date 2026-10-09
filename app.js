@@ -1723,6 +1723,49 @@ renderQuickFoods();
 renderInstallHowto();
 bootstrap();
 
+/* ---------- 안드로이드 물리 뒤로가기 버튼 ----------
+ * 뒤로가기를 누르면 앱이 바로 꺼지지 않고, 열린 창 → 셀러 탭 순서로 한 단계씩 닫히게 한다.
+ * 방법: 히스토리에 "가드" 항목을 하나 올려두고, 뒤로가기로 그게 빠지면(popstate)
+ * 화면 하나를 닫은 뒤 가드를 다시 올린다.
+ * 주의: 크롬은 사용자 터치 없이 pushState로 쌓은 항목은 뒤로가기 때 건너뛰어 버린다
+ * (그래서 페이지 로딩 직후에 가드를 올리면 뒤로가기가 그냥 앱을 꺼버린다).
+ * 그래서 가드는 사용자가 화면을 터치/클릭할 때 올리고, 뒤로가기 처리 직후에 다시
+ * 올린 가드는 다음 터치 때 한 번 더 올려서 확실히 살려둔다.
+ */
+var BACK_REARM = false;     // 터치 없이 올린 가드라서 다음 터치 때 다시 올려야 하는지
+var BACK_EXIT_AT = 0;       // 셀러 탭에서 첫 뒤로가기를 누른 시각(두 번 누르면 종료)
+function backGuardOn() { return !!(history.state && history.state.dkmkGuard); }
+function pushBackGuard() {
+  try { history.pushState({ dkmkGuard: Date.now() }, ''); } catch (e) { /* 지원 안 되면 무시 */ }
+}
+function armBackGuard() {
+  if (!backGuardOn() || BACK_REARM) { pushBackGuard(); BACK_REARM = false; }
+}
+['click', 'touchend', 'keydown'].forEach(function (ev) {
+  document.addEventListener(ev, armBackGuard, true);
+});
+/** 뒤로가기 한 번에 닫을 게 있으면 닫고 true, 없으면 false */
+function handleBack() {
+  if (document.getElementById('pinScreen').style.display !== 'none') return false; // 로그인 화면
+  var open = document.querySelectorAll('.modal-bg.on');
+  if (open.length) {
+    var top = open[open.length - 1]; // DOM상 뒤에 있는 창이 위에 겹쳐 뜬다
+    if (top.id === 'addModal') closeAdd(); else cm(top.id);
+    return true;
+  }
+  var cur = document.querySelector('.page.on');
+  if (cur && cur.id !== 'pgCellar') { showPage('Cellar'); return true; }
+  return false;
+}
+window.addEventListener('popstate', function () {
+  if (backGuardOn()) return; // 가드로 "앞으로" 온 경우 등 — 뒤로가기가 아님
+  if (handleBack()) { BACK_EXIT_AT = 0; pushBackGuard(); BACK_REARM = true; return; }
+  if (Date.now() - BACK_EXIT_AT < 2000) { history.back(); return; } // 두 번째 → 종료
+  BACK_EXIT_AT = Date.now();
+  toast('한 번 더 누르면 종료돼요');
+  pushBackGuard(); BACK_REARM = true;
+});
+
 // 안드로이드 크롬이 홈 화면 아이콘을 manifest.json대로 제대로 그리려면
 // 서비스 워커가 등록돼 있어야 한다(없으면 기본 아이콘으로 대체됨).
 if ('serviceWorker' in navigator) {
