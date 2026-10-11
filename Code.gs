@@ -478,27 +478,45 @@ function authSecret_() {
 
 function sign_(payload) {
   return Utilities.base64EncodeWebSafe(
-    Utilities.computeHmacSha256Signature(payload, authSecret_())
+    Utilities.computeHmacSha256Signature(payload, authSecret_(), Utilities.Charset.UTF_8)
   );
 }
 
-/** 서명된 토큰. 서버에 세션을 따로 저장하지 않아도 위조를 막을 수 있다. */
+/**
+ * 서명된 토큰. 서버에 세션을 따로 저장하지 않아도 위조를 막을 수 있다.
+ *
+ * 형식: "2|<encodeURIComponent(아이디)>|<만료시각>|<서명>" 을 base64(web safe)로.
+ * 예전 형식("<아이디>|<만료시각>|<서명>")은 아이디를 그대로 넣고 문자셋을 지정하지 않고
+ * base64/HMAC을 돌려서, "장재현"처럼 한글(비 ASCII) 아이디는 토큰을 만들 때와 확인할 때
+ * 글자가 달라져 서명이 안 맞았다 — 로그인 직후 첫 요청에서 "로그인이 필요해요"가 나고
+ * 바로 로그아웃되던 원인. 아이디를 encodeURIComponent로 ASCII만 남게 바꾸고 문자셋도
+ * UTF-8로 못박는다. 이름에 '|'가 들어가도 칸이 안 밀린다.
+ */
 function makeToken_(userId) {
   var exp = Date.now() + TOKEN_DAYS * 24 * 60 * 60 * 1000;
-  var payload = userId + '|' + exp;
-  return Utilities.base64EncodeWebSafe(payload + '|' + sign_(payload));
+  var payload = '2|' + encodeURIComponent(String(userId)) + '|' + exp;
+  return Utilities.base64EncodeWebSafe(payload + '|' + sign_(payload), Utilities.Charset.UTF_8);
 }
 
 function verifyToken_(token) {
   if (!token) return null;
   try {
-    var raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(String(token))).getDataAsString();
+    var raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(String(token))).getDataAsString('UTF-8');
     var parts = raw.split('|');
-    if (parts.length !== 3) return null;
-    var payload = parts[0] + '|' + parts[1];
-    if (sign_(payload) !== parts[2]) return null;
-    if (Number(parts[1]) < Date.now()) return null;
-    return parts[0];
+    var id, exp, payload, sig;
+    if (parts.length === 4 && parts[0] === '2') {
+      payload = parts[0] + '|' + parts[1] + '|' + parts[2];
+      id = decodeURIComponent(parts[1]); exp = parts[2]; sig = parts[3];
+    } else if (parts.length === 3) {
+      // 예전 형식 — 영문/숫자 아이디(관리자 dkmk 등)로 이미 받아 둔 토큰은 그대로 인정한다
+      payload = parts[0] + '|' + parts[1];
+      id = parts[0]; exp = parts[1]; sig = parts[2];
+    } else {
+      return null;
+    }
+    if (sign_(payload) !== sig) return null;
+    if (Number(exp) < Date.now()) return null;
+    return id;
   } catch (err) {
     return null;
   }
@@ -557,7 +575,12 @@ function enter(name, pw) {
 
     var isFirst = userRows_().length === 0;
     var salt = randomHex_(16);
-    userSheet_().appendRow([key, display, hashPw_(pw, salt), salt, todayStr_(), todayStr_()]);
+    // 아이디·이름·해시·솔트는 글자 그대로 남도록 텍스트 서식으로 쓴다. appendRow는 "0012"를 12로,
+    // 숫자로만 된 솔트를 지수 표기 숫자로 바꿔 버려서 그 계정은 다시 못 찾거나 비번이 안 맞게 된다.
+    var ush = userSheet_();
+    var newRow = ush.getLastRow() + 1;
+    ush.getRange(newRow, 1, 1, 4).setNumberFormat('@');
+    ush.getRange(newRow, 1, 1, USER_COLUMNS.length).setValues([[key, display, hashPw_(pw, salt), salt, todayStr_(), todayStr_()]]);
 
     // 첫 셀러라면 소유자가 비어 있던 기존 와인을 넘겨받는다
     var moved = isFirst ? claimOrphanWines_(key) : 0;
@@ -597,6 +620,7 @@ function changePassword(token, newPw) {
 
   var salt = randomHex_(16);
   var sheet = userSheet_();
+  sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('비번해시') + 1, 1, 2).setNumberFormat('@'); // 솔트가 숫자로 바뀌지 않게
   sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('비번해시') + 1).setValue(hashPw_(newPw, salt));
   sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('솔트') + 1).setValue(salt);
   return { ok: true };
