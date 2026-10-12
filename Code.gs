@@ -626,15 +626,20 @@ function changePassword(token, newPw) {
   return { ok: true };
 }
 
-/** 토큰이 아직 쓸 만한지 확인 (앱 시작 때) */
+/**
+ * 토큰이 아직 쓸 만한지 확인 (앱 시작 때).
+ * ok:false는 "토큰 자체가 무효"일 때만 돌려준다 — 앱은 이걸 받으면 로그아웃시킨다.
+ * 예전엔 시트를 잠깐 못 읽는 것 같은 일시적인 서버 오류까지 전부 ok:false로 돌려줘서,
+ * 그럴 때마다 멀쩡한 사용자가 앱을 다시 켜면 로그인 화면으로 튕겼다. 그런 오류는
+ * 예외를 그대로 던져 {error}로 가게 한다(앱은 로그인 상태를 유지한 채 알림만 띄운다).
+ */
 function checkToken(token) {
-  try {
-    var user = requireUser_(token);
-    var id = String(user['아이디']);
-    return { ok: true, name: String(user['이름']), id: id, isAdmin: id === ADMIN_ID };
-  } catch (err) {
-    return { ok: false };
-  }
+  var id = verifyToken_(token);
+  if (!id) return { ok: false };
+  var user = findUser_(id);
+  if (!user) return { ok: false };
+  id = String(user['아이디']);
+  return { ok: true, name: String(user['이름']), id: id, isAdmin: id === ADMIN_ID };
 }
 
 function fmtDateMaybe_(v) {
