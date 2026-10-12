@@ -443,11 +443,15 @@ function bootstrap() {
       AUTH_RECOVERY_SHOWN = false;
       document.getElementById('pinScreen').style.display = 'none';
       if (WINES_LOADED) saveWinesCache();
-    } else if (cached && res && res.error) {
-      // 인터넷이 잠깐 끊긴 것뿐이면 로그아웃시키지 않고 저장된 목록을 계속 보여준다
-      toast(res.error);
-    } else {
+    } else if (res && res.ok === false) {
+      // 서버가 "이 토큰은 무효"라고 분명히 답한 경우에만 로그아웃
       logout('다시 들어와주세요');
+    } else {
+      // 인터넷이 잠깐 끊겼거나 서버가 일시적으로 오류를 낸 것뿐이면 로그아웃시키지 않는다.
+      // 예전엔 저장된 목록이 없을 때(처음 로그인 직후 앱을 다시 켠 경우 등) 이런 일시 오류에도
+      // 로그아웃시켜서, 매번 다시 로그인해야 하는 것처럼 보였다.
+      document.getElementById('pinScreen').style.display = 'none';
+      toast((res && res.error) || '서버와 연결이 잠깐 안 돼요');
     }
   });
   load();
