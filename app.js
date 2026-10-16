@@ -70,9 +70,13 @@ function findWine(r) {
  * 다시 하게 돼서 느리고 API 비용도 계속 나갔다. 대신 3개월이 지나면 한 번 더 물어본다
  * (페어링 캐시와 같은 주기).
  */
+// 테이스팅 노트는 이 날짜에 추가됐다. 그 전에 이미 AI에게 물어봐서 "정보갱신일"이 찍힌
+// 와인은 3개월을 기다리지 않고 노트만 채우러 한 번 더 물어본다(그 뒤엔 다시 3개월 주기).
+var TASTING_NOTE_SINCE = '2026-10-16';
 function infoAskDue(w) {
   var stamped = String(w['정보갱신일'] || '');
   if (!stamped) return true;
+  if (!w['테이스팅노트'] && stamped < TASTING_NOTE_SINCE) return true;
   var cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - 3);
   var y = cutoff.getFullYear(), m = ('0' + (cutoff.getMonth() + 1)).slice(-2), d = ('0' + cutoff.getDate()).slice(-2);
@@ -83,7 +87,21 @@ function infoAskDue(w) {
 function infoIncomplete(w) {
   return !w['서빙온도'] || !w['완벽한잔'] || !w['추천 페어링'] || !w['베스트페어링'] ||
     !w['품종'] || !w['생산지/국가'] || !w['와인배경'] || !w['평균가격(국내·원)'] ||
-    !w['당도'] || !w['산도'] || !w['타닌'] || !w['바디감'];
+    !w['당도'] || !w['산도'] || !w['타닌'] || !w['바디감'] || !w['테이스팅노트'];
+}
+
+/**
+ * 셀러에 막 넣은 와인들의 AI 정보(테이스팅 노트·서빙·페어링 등)를 상세를 열기 전에
+ * 미리 채워둔다. 한 병씩 차례로 물어봐서 AI 서버에 요청이 몰리지 않게 하고,
+ * 다 끝나면 목록을 한 번만 새로고침한다. 실패해도 조용히 넘어간다 —
+ * 상세를 열 때 빈 정보가 있으면 그때 다시 채우는 기존 흐름이 그대로 남아 있다.
+ */
+function prefillWineInfo(rowIndexes) {
+  var rows = (rowIndexes || []).filter(Boolean);
+  if (!rows.length) return;
+  rows.reduce(function (p, r) {
+    return p.then(function () { return callAPI(function () { return API.suggestWineInfo(r); }); });
+  }, Promise.resolve()).then(function () { load(); });
 }
 
 function starsHtml(n) {
@@ -743,6 +761,7 @@ function openDetail(r) {
     photo +
     '<div class="facts" id="detailFacts">' + detailFactsHtml(w) + '</div>' +
     '<div id="styleBox">' + styleChartHtml(w) + '</div>' +
+    '<div id="tastingBox">' + tastingNoteHtml(w) + '</div>' +
     '<div id="servingBox">' + (servingFactsHtml(w) || (needSuggest ? '<div class="note" id="servingSuggest" style="margin-top:12px">🍷 부족한 정보 AI로 채우는 중…</div>' : '')) + '</div>' +
     '<div class="act-row" style="margin-top:14px">' +
     '<button class="act" onclick="shareWine(' + r + ')"><span class="ic">🔗</span>공유</button>' +
@@ -764,17 +783,26 @@ function openDetail(r) {
         '내잔추천', '내잔추천별점', '추천 페어링', '추천페어링별점',
         '베스트페어링', '베스트페어링별점',
         '와인배경', '평균가격(국내·원)', '정보갱신일',
-        '당도', '산도', '타닌', '바디감'].forEach(function (k) {
+        '당도', '산도', '타닌', '바디감', '테이스팅노트'].forEach(function (k) {
         if (res[k]) w[k] = res[k];
       });
       var factsEl = document.getElementById('detailFacts');
       if (factsEl) factsEl.innerHTML = detailFactsHtml(w);
       var styleEl = document.getElementById('styleBox');
       if (styleEl) styleEl.innerHTML = styleChartHtml(w);
+      var tastingEl = document.getElementById('tastingBox');
+      if (tastingEl) tastingEl.innerHTML = tastingNoteHtml(w);
       var servingEl = document.getElementById('servingBox');
       if (servingEl) servingEl.innerHTML = servingFactsHtml(w);
     });
   }
+}
+
+/** AI가 채운 테이스팅 노트(색·향·맛·피니시). 아직 없으면 빈 문자열. */
+function tastingNoteHtml(w) {
+  if (!w['테이스팅노트']) return '';
+  return '<div class="sect" style="margin:20px 0 6px">👃 테이스팅 노트</div>' +
+    '<div class="fact" style="border-bottom:none;padding-top:4px"><div class="v">' + esc(w['테이스팅노트']) + '</div></div>';
 }
 
 /**
@@ -876,6 +904,7 @@ function shareWineText(w) {
   // 같은 잔을 안 갖고 있을 테니 공유 내용에서는 뺀다(완벽한 잔은 누구에게나 유효해서 남김).
   if (w['베스트페어링']) lines.push('클래식 페어링 음식: ' + w['베스트페어링'] + (w['베스트페어링별점'] ? ' ' + starsHtml(w['베스트페어링별점']) : ''));
   if (w['추천 페어링']) lines.push('제안 페어링 음식: ' + w['추천 페어링'] + (w['추천페어링별점'] ? ' ' + starsHtml(w['추천페어링별점']) : ''));
+  if (w['테이스팅노트']) lines.push('\n테이스팅 노트: ' + w['테이스팅노트']);
   if (w['와인배경']) lines.push('\n' + w['와인배경']);
   return lines.join('\n');
 }
@@ -1314,6 +1343,7 @@ function addPicked() {
     if (!r || r.error) { toast('실패: ' + ((r && r.error) || '')); btn.disabled = false; renderPicks(); return; }
     toast(r.added + '병 담았어요 🍾');
     cancelPick(); cm('addModal'); goCellarOwned();
+    prefillWineInfo(r.rowIndexes);
   });
 }
 
@@ -1372,6 +1402,7 @@ function submitAdd(e) {
     // 마신 와인을 수정했으면 기록 탭 "마신 와인" 칸으로, 새로 담았거나 보유 와인을 고쳤으면
     // 셀러 "보유" 칸으로 — 안 그러면 방금 고친 와인이 안 보이는 곳으로 튕겨서 "수정이 안 됐나?" 싶어진다.
     editingDrunk ? goStatSeg('마심') : goCellarOwned();
+    if (!editing) prefillWineInfo([res.rowIndex]);
   });
 }
 
