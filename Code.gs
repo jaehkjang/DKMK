@@ -75,7 +75,8 @@ function route_(params) {
 function dispatch_(action, p) {
   var token = p.token;
   switch (action) {
-    case 'enter':            return enter(p.name, p.pw);
+    case 'enter':            return enter(p.name, p.pw, p.invite);
+    case 'resetInviteCode':  return resetInviteCode(token);
     case 'checkToken':       return checkToken(token);
     case 'changePassword':   return changePassword(token, p.newPw);
     case 'getWines':         return getWines(token);
@@ -562,9 +563,29 @@ var USER_COLUMNS = ['아이디', '이름', '비번해시', '솔트', '가입일'
 var OWNER_COLUMN = '소유자';
 var HASH_ROUNDS = 1000;
 var TOKEN_DAYS = 365;
-var PW_MAX_FAILS = 5;            // 비밀번호를 이만큼 연속으로 틀리면
-var PW_LOCK_SECONDS = 10 * 60;   // 이 시간 동안 그 셀러로는 입장을 막는다(4자리 숫자 무차별 대입 방지)
-var ADMIN_ID = 'dkmk'; // 이 아이디로 로그인하면 설정에서 전체 사용자 현황을 볼 수 있다
+// 비밀번호를 PW_FREE_FAILS번 연속 틀리면 그 뒤로는 PW_SLOW_SECONDS에 한 번만 시도할 수 있다.
+// 완전히 잠그지 않는 이유: 이름만 아는 남이 일부러 틀려서 주인을 오래 못 들어오게 막는 걸 줄이려고.
+// 1분에 한 번이면 4자리 숫자 1만 개를 다 시도하는 데 약 7일이 걸린다.
+var PW_FREE_FAILS = 5;
+var PW_SLOW_SECONDS = 60;
+var PW_FAIL_MEMORY_SECONDS = 60 * 60; // 마지막으로 틀린 뒤 이 시간이 지나면 실패 횟수를 잊는다
+// 새 셀러는 초대 코드가 있어야 만든다(스크립트 속성 INVITE_CODE, 없으면 처음 필요할 때 만든다).
+// 코드를 마구 넣어 보는 걸 막으려고 전체 기준 INVITE_MAX_FAILS번 틀리면 INVITE_FAIL_SECONDS 동안 새 셀러 생성을 멈춘다.
+var INVITE_MAX_FAILS = 10;
+var INVITE_FAIL_SECONDS = 10 * 60;
+// 셀러 한 곳이 하루에 부를 수 있는 AI(Gemini) 호출 수. 스크립트 속성 AI_DAILY_LIMIT로 바꿀 수 있다.
+var AI_DAILY_LIMIT_DEFAULT = 200;
+var CURRENT_USER_ID_ = ''; // 이번 요청의 사용자 — requireUser_가 채운다(AI 사용량 계산용)
+var ADMIN_ID_DEFAULT = 'dkmk';
+
+/**
+ * 관리자 아이디. 이 아이디로 로그인하면 설정에서 전체 사용자 현황을 볼 수 있다.
+ * 스크립트 속성 ADMIN_ID가 있으면 그 값을 쓴다(편집기 권한이 있는 사람만 바꿀 수 있음).
+ * 이 이름으로는 앱에서 새 셀러를 만들 수 없다(첫 셀러일 때만 예외).
+ */
+function adminId_() {
+  return normName_(prop_('ADMIN_ID') || ADMIN_ID_DEFAULT);
+}
 
 /** 사용자 시트 (없으면 만든다) */
 function userSheet_() {
@@ -600,12 +621,18 @@ function findUser_(id) {
   return null;
 }
 
+/**
+ * 솔트·비밀키·초대 코드용 난수. Math.random()은 보안용 난수가 아니라서 쓰지 않고,
+ * Utilities.getUuid()(무작위 UUID)를 SHA-256으로 섞어 필요한 길이만큼 만든다.
+ */
 function randomHex_(bytes) {
   var out = '';
-  for (var i = 0; i < bytes; i++) {
-    out += ('0' + Math.floor(Math.random() * 256).toString(16)).slice(-2);
+  while (out.length < bytes * 2) {
+    var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
+      Utilities.getUuid() + '|' + Utilities.getUuid() + '|' + Date.now(), Utilities.Charset.UTF_8);
+    out += digest.map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join('');
   }
-  return out;
+  return out.slice(0, bytes * 2);
 }
 
 /**
@@ -698,32 +725,87 @@ function requireUser_(token) {
   var user = findUser_(t.id);
   if (!user) throw new Error('계정을 찾을 수 없어요');
   if (t.ver !== tokenVersion_(user)) throw new Error('로그인이 필요해요'); // 비번이 바뀐 뒤의 옛 토큰
+  CURRENT_USER_ID_ = String(user['아이디']);
   return user;
 }
 
-function pwFailKey_(userId) {
-  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(userId), Utilities.Charset.UTF_8);
-  return 'pwfail:' + Utilities.base64EncodeWebSafe(digest);
+/** 캐시 키 (아이디가 한글이어도 키 길이·문자 제한에 안 걸리게 해시) */
+function cacheKey_(prefix, id) {
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(id), Utilities.Charset.UTF_8);
+  return prefix + ':' + Utilities.base64EncodeWebSafe(digest);
 }
 
-/** 비번 확인 + 연속 실패 잠금. 맞으면 null, 아니면 화면에 보여줄 오류 문구. */
+/** 비번 확인 + 연속 실패 시 속도 제한. 맞으면 null, 아니면 화면에 보여줄 오류 문구. */
 function checkPassword_(user, pw) {
   var cache = CacheService.getScriptCache();
-  var key = pwFailKey_(user['아이디']);
-  var fails = Number(cache.get(key) || 0);
-  if (fails >= PW_MAX_FAILS) {
-    return '비밀번호를 ' + PW_MAX_FAILS + '번 틀려서 잠시 잠겼어요. ' + Math.round(PW_LOCK_SECONDS / 60) + '분 뒤에 다시 시도해주세요';
+  var key = cacheKey_('pwfail', user['아이디']);
+  var state = { n: 0, t: 0 };
+  try { state = JSON.parse(cache.get(key) || '') || state; } catch (e) { /* 없거나 깨졌으면 처음부터 */ }
+  var now = Date.now();
+  if (state.n >= PW_FREE_FAILS) {
+    var wait = Math.ceil((state.t + PW_SLOW_SECONDS * 1000 - now) / 1000);
+    if (wait > 0) return '비밀번호를 여러 번 틀려서 1분에 한 번만 시도할 수 있어요. ' + wait + '초 뒤에 다시 시도해주세요';
   }
   if (hashPw_(pw, user['솔트']) !== user['비번해시']) {
-    fails++;
-    cache.put(key, String(fails), PW_LOCK_SECONDS);
-    var left = PW_MAX_FAILS - fails;
+    state = { n: state.n + 1, t: now };
+    cache.put(key, JSON.stringify(state), PW_FAIL_MEMORY_SECONDS);
+    var left = PW_FREE_FAILS - state.n;
     return left > 0
-      ? '비밀번호가 맞지 않아요 (' + left + '번 더 틀리면 ' + Math.round(PW_LOCK_SECONDS / 60) + '분 동안 잠겨요)'
-      : '비밀번호를 ' + PW_MAX_FAILS + '번 틀려서 ' + Math.round(PW_LOCK_SECONDS / 60) + '분 동안 잠겼어요';
+      ? '비밀번호가 맞지 않아요 (' + left + '번 더 틀리면 1분에 한 번만 시도할 수 있어요)'
+      : '비밀번호가 맞지 않아요. 이제 1분에 한 번만 시도할 수 있어요';
   }
   cache.remove(key);
   return null;
+}
+
+/** 초대 코드. 스크립트 속성 INVITE_CODE에 있고, 없으면 6자리 숫자로 새로 만들어 저장한다. */
+function inviteCode_() {
+  var code = String(prop_('INVITE_CODE') || '').trim();
+  if (code) return code;
+  return resetInviteCode_();
+}
+
+function resetInviteCode_() {
+  var code = String(parseInt(randomHex_(6), 16) % 1000000);
+  while (code.length < 6) code = '0' + code;
+  PropertiesService.getScriptProperties().setProperty('INVITE_CODE', code);
+  return code;
+}
+
+/** 관리자 전용 — 초대 코드를 새로 바꾼다(예전 코드는 그 순간부터 안 통한다). 이미 있는 셀러에는 영향 없음. */
+function resetInviteCode(token) {
+  var me = requireUser_(token);
+  if (String(me['아이디']) !== adminId_()) throw new Error('관리자만 할 수 있어요');
+  return { ok: true, inviteCode: resetInviteCode_() };
+}
+
+/** 새 셀러용 초대 코드 확인. 맞으면 null, 아니면 오류 문구. */
+function checkInvite_(invite) {
+  var cache = CacheService.getScriptCache();
+  var fails = Number(cache.get('invitefail') || 0);
+  if (fails >= INVITE_MAX_FAILS) return '초대 코드를 여러 번 틀려서 잠시 새 셀러를 만들 수 없어요. 10분 뒤에 다시 시도해주세요';
+  invite = String(invite || '').trim();
+  if (!invite) return '처음 보는 셀러 이름이에요. 이름이 맞다면 새 셀러를 만들 초대 코드를 넣어주세요';
+  if (invite !== inviteCode_()) {
+    cache.put('invitefail', String(fails + 1), INVITE_FAIL_SECONDS);
+    return '초대 코드가 맞지 않아요';
+  }
+  return null;
+}
+
+/**
+ * AI 호출 한도. callGemini_가 실제로 AI를 부르기 직전에 센다(캐시로 답한 추천은 안 셈).
+ * 편집기에서 직접 실행하는 함수(backfill 등)는 사용자가 없으니 세지 않는다.
+ * CacheService는 최대 6시간까지만 보관해서, 6시간 넘게 호출이 없으면 그날 횟수도 초기화된다.
+ */
+function useAiQuota_() {
+  if (!CURRENT_USER_ID_) return;
+  var limit = Number(prop_('AI_DAILY_LIMIT')) || AI_DAILY_LIMIT_DEFAULT;
+  var cache = CacheService.getScriptCache();
+  var key = cacheKey_('ai:' + todayStr_(), CURRENT_USER_ID_);
+  var n = Number(cache.get(key) || 0);
+  if (n >= limit) throw new Error('오늘 AI 사용 한도(' + limit + '회)를 다 썼어요. 내일 다시 시도해주세요');
+  cache.put(key, String(n + 1), 6 * 60 * 60);
 }
 
 /** 이름을 조회 키로 정규화 (대소문자·앞뒤 공백 무시 → 같은 셀러로 들어가게) */
@@ -737,7 +819,7 @@ function normName_(name) {
  *  - 이미 있는 이름이면 비번을 확인하고 그 셀러로 들어간다
  * 그래서 같은 이름·비번을 아는 사람끼리 하나의 셀러를 같이 쓴다.
  */
-function enter(name, pw) {
+function enter(name, pw, invite) {
   var display = String(name || '').trim();
   pw = String(pw || '');
   var key = normName_(display);
@@ -750,7 +832,7 @@ function enter(name, pw) {
     var pwErr = checkPassword_(existing, pw);
     if (pwErr) return { error: pwErr };
     userSheet_().getRange(existing.rowIndex, USER_COLUMNS.indexOf('마지막로그인') + 1).setValue(todayStr_());
-    return { ok: true, token: makeToken_(key, tokenVersion_(existing)), name: String(existing['이름']), created: false, id: key, isAdmin: key === ADMIN_ID };
+    return { ok: true, token: makeToken_(key, tokenVersion_(existing)), name: String(existing['이름']), created: false, id: key, isAdmin: key === adminId_() };
   }
 
   var lock = LockService.getScriptLock();
@@ -765,10 +847,16 @@ function enter(name, pw) {
     if (again) {
       var againErr = checkPassword_(again, pw);
       if (againErr) return { error: againErr };
-      return { ok: true, token: makeToken_(key, tokenVersion_(again)), name: String(again['이름']), created: false, id: key, isAdmin: key === ADMIN_ID };
+      return { ok: true, token: makeToken_(key, tokenVersion_(again)), name: String(again['이름']), created: false, id: key, isAdmin: key === adminId_() };
     }
 
     var isFirst = userRows_().length === 0;
+    // 맨 처음 셀러(설치 직후)만 초대 코드 없이 만든다. 그 뒤로는 초대 코드가 있어야 한다.
+    if (!isFirst) {
+      if (key === adminId_()) return { error: '이 이름으로는 새 셀러를 만들 수 없어요' };
+      var inviteErr = checkInvite_(invite);
+      if (inviteErr) return { error: inviteErr, needInvite: true };
+    }
     var salt = randomHex_(16);
     // 아이디·이름·해시·솔트는 글자 그대로 남도록 텍스트 서식으로 쓴다. appendRow는 "0012"를 12로,
     // 숫자로만 된 솔트를 지수 표기 숫자로 바꿔 버려서 그 계정은 다시 못 찾거나 비번이 안 맞게 된다.
@@ -780,7 +868,7 @@ function enter(name, pw) {
     // 첫 셀러라면 소유자가 비어 있던 기존 와인을 넘겨받는다
     var moved = isFirst ? claimOrphanWines_(key) : 0;
 
-    return { ok: true, token: makeToken_(key, 0), name: display, created: true, moved: moved, id: key, isAdmin: key === ADMIN_ID };
+    return { ok: true, token: makeToken_(key, 0), name: display, created: true, moved: moved, id: key, isAdmin: key === adminId_() };
   } finally {
     lock.releaseLock();
   }
@@ -839,7 +927,7 @@ function checkToken(token) {
   if (!user) return { ok: false };
   if (t.ver !== tokenVersion_(user)) return { ok: false };
   var id = String(user['아이디']);
-  return { ok: true, name: String(user['이름']), id: id, isAdmin: id === ADMIN_ID };
+  return { ok: true, name: String(user['이름']), id: id, isAdmin: id === adminId_() };
 }
 
 function fmtDateMaybe_(v) {
@@ -852,14 +940,14 @@ function fmtDateMaybe_(v) {
 }
 
 /**
- * 관리자(ADMIN_ID)만 볼 수 있는 전체 사용자 현황. 셀러(사용자)별로 보유/마신
+ * 관리자(adminId_)만 볼 수 있는 전체 사용자 현황. 셀러(사용자)별로 보유/마신
  * 와인 수와 마지막 활동일을 모아 보여준다. 와인 시트를 한 번만 훑어서
  * 소유자별로 집계하고(사용자마다 따로 조회하지 않음), 가입일 최신순이 아니라
  * 최근에 로그인한 순으로 정렬해서 활발한 셀러가 위로 오게 한다.
  */
 function getAdminOverview(token) {
   var me = requireUser_(token);
-  if (String(me['아이디']) !== ADMIN_ID) throw new Error('관리자만 볼 수 있어요');
+  if (String(me['아이디']) !== adminId_()) throw new Error('관리자만 볼 수 있어요');
 
   var sheet = getSheet_();
   var headers = getHeaders_();
@@ -896,13 +984,15 @@ function getAdminOverview(token) {
       마지막로그인: fmtDateMaybe_(u['마지막로그인']),
       보유: stat.보유,
       마심: stat.마심,
-      마지막활동: stat.마지막활동
+      마지막활동: stat.마지막활동,
+      관리자: id === adminId_()
     };
   }).sort(function (a, b) { return String(b.마지막로그인).localeCompare(String(a.마지막로그인)); });
 
   return {
     totalUsers: users.length,
     totalWines: totalWines,
+    inviteCode: inviteCode_(),
     users: users
   };
 }
@@ -926,7 +1016,7 @@ function deleteRowsWhereColumnEquals_(sheet, colIndex0, targetId, headerRows) {
 }
 
 /**
- * 관리자(ADMIN_ID)가 사용자 계정을 완전히 삭제한다. 계정만 지우는 게 아니라
+ * 관리자(adminId_)가 사용자 계정을 완전히 삭제한다. 계정만 지우는 게 아니라
  * 그 사람이 등록한 와인·잔·페어링 캐시까지 전부 지운다 — 로그인 못 하는
  * 계정에 데이터만 남겨두면 나중에 다른 사람이 같은 이름으로 새로 가입했을 때
  * 엉뚱한 옛날 데이터를 물려받게 되기 때문. 되돌릴 수 없다.
@@ -934,11 +1024,11 @@ function deleteRowsWhereColumnEquals_(sheet, colIndex0, targetId, headerRows) {
  */
 function deleteUserAccount(token, targetId) {
   var admin = requireUser_(token);
-  if (String(admin['아이디']) !== ADMIN_ID) throw new Error('관리자만 할 수 있어요');
+  if (String(admin['아이디']) !== adminId_()) throw new Error('관리자만 할 수 있어요');
 
   targetId = normName_(targetId);
   if (!targetId) return { error: '아이디를 알려주세요' };
-  if (targetId === ADMIN_ID) return { error: '관리자 계정은 삭제할 수 없어요' };
+  if (targetId === adminId_()) return { error: '관리자 계정은 삭제할 수 없어요' };
 
   var target = findUser_(targetId);
   if (!target) return { error: '없는 사용자예요' };
@@ -1405,6 +1495,7 @@ var GEMINI_MODEL = 'gemini-3.6-flash';
 
 /** Gemini 호출 후 JSON 응답을 파싱해서 반환. parts는 [{text:..}, {inline_data:..}] 형태. */
 function callGemini_(parts) {
+  useAiQuota_();
   var apiKey = prop_('GEMINI_API_KEY');
   if (apiKey) apiKey = apiKey.trim();
   if (!apiKey) throw new Error('GEMINI_API_KEY가 설정되지 않았어요 (스크립트 속성에 추가해주세요)');

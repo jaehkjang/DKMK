@@ -31,10 +31,12 @@
         <input id="authId" placeholder="셀러 이름" autocomplete="username" autocapitalize="none" spellcheck="false">
         <input id="authPw" type="password" placeholder="비밀번호 4자리 숫자" autocomplete="current-password"
           inputmode="numeric" pattern="[0-9]*" maxlength="4" oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)">
+        <!-- 처음 보는 이름이면 서버가 초대 코드를 요구한다 — 그때만 보인다 -->
+        <input id="authInvite" placeholder="초대 코드" autocomplete="off" inputmode="numeric" style="display:none">
         <button id="authBtn" type="submit">시작하기</button>
       </form>
       <div id="pinErr"></div>
-      <div class="auth-hint">처음 쓰는 이름이면 셀러가 새로 만들어져요. 같은 이름·비밀번호를 넣으면 둘이 같은 셀러를 봅니다.</div>
+      <div class="auth-hint">같은 이름·비밀번호를 넣으면 둘이 같은 셀러를 봅니다. 새 셀러를 만들려면 초대 코드가 필요해요.</div>
     </div>
   </div>
 
@@ -277,7 +279,7 @@
 
   <div id="toast"></div>
 
-  <script src="api.js?v=20261019b"></script>
-  <script src="app.js?v=20261019b"></script>
+  <script src="api.js?v=20261019c"></script>
+  <script src="app.js?v=20261019c"></script>
 </body>
 </html>
