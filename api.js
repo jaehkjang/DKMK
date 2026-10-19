@@ -45,7 +45,8 @@ const API = {
   },
 
   // ── 셀러(계정) ──
-  enter(name, pw)          { return this._post('enter', { name, pw }); },
+  // invite: 새 셀러를 만들 때만 필요한 초대 코드(이미 있는 셀러로 들어갈 땐 비워 둔다)
+  enter(name, pw, invite)  { return this._post('enter', { name, pw, invite }); },
   checkToken()             { return this._get('checkToken'); },
   changePassword(newPw)    { return this._post('changePassword', { newPw }); },
 
@@ -72,6 +73,7 @@ const API = {
   recommendFoodRequired()  { return this._get('recommendFoodRequired'); },
   getAdminOverview()       { return this._get('getAdminOverview'); },
   deleteUserAccount(id)    { return this._post('deleteUserAccount', { id }); },
+  resetInviteCode()        { return this._post('resetInviteCode'); },
 
   // ── 내 잔 ──
   getGlasses()              { return this._get('getGlasses'); },

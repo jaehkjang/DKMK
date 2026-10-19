@@ -131,9 +131,17 @@ function submitAuth(ev) {
   btn.disabled = true; btn.textContent = '잠시만요…';
   err.textContent = '';
 
-  callAPI(function () { return API.enter(name, pw); }).then(function (res) {
+  var inviteEl = document.getElementById('authInvite');
+  var invite = inviteEl.style.display === 'none' ? '' : inviteEl.value.trim();
+  callAPI(function () { return API.enter(name, pw, invite); }).then(function (res) {
     btn.disabled = false; btn.textContent = '시작하기';
+    if (res && res.needInvite) {
+      // 처음 보는 이름 — 새 셀러를 만들려면 초대 코드가 필요하다. 그때만 입력칸을 보여준다.
+      inviteEl.style.display = '';
+      inviteEl.focus();
+    }
     if (!res || res.error) { err.textContent = (res && res.error) || '문제가 생겼어요'; return; }
+    inviteEl.value = ''; inviteEl.style.display = 'none';
     API.setToken(res.token);
     TOKEN = res.token; ME = res.name; IS_ADMIN = !!res.isAdmin;
     AUTH_RECOVERY_SHOWN = false; // 새로 로그인했으니 다음에 또 끊기면 다시 감지할 수 있게
@@ -167,10 +175,14 @@ function loadAdminOverview() {
   callAPI(function () { return API.getAdminOverview(); }).then(function (data) {
     if (!data || data.error) { el.innerHTML = '<div class="note">' + esc((data && data.error) || '불러오지 못했어요') + '</div>'; return; }
     if (!data.users.length) { el.innerHTML = '<div class="note">아직 가입한 사용자가 없어요</div>'; return; }
-    el.innerHTML = '<div class="admin-summary">총 ' + data.totalUsers + '명 · 등록된 와인 ' + data.totalWines + '병</div>' +
+    var inviteHtml = data.inviteCode
+      ? '<div class="admin-summary">새 셀러 초대 코드: <b id="inviteCode">' + esc(data.inviteCode) + '</b> ' +
+        '<button type="button" class="admin-del-btn" id="resetInviteBtn">새 코드로 바꾸기</button></div>'
+      : '';
+    el.innerHTML = inviteHtml + '<div class="admin-summary">총 ' + data.totalUsers + '명 · 등록된 와인 ' + data.totalWines + '병</div>' +
       data.users.map(function (u) {
         // 관리자 자기 자신은 삭제 버튼을 아예 안 보여준다(서버도 막지만, UI에서도 헷갈리지 않게).
-        var delBtn = u.아이디 === 'dkmk' ? '' :
+        var delBtn = u.관리자 ? '' :
           '<button type="button" class="admin-del-btn" data-id="' + esc(u.아이디) + '" data-name="' + esc(u.이름) + '">삭제</button>';
         return '<div class="admin-row">' +
           '<div class="admin-row-top"><b>' + esc(u.이름) + '</b><span class="admin-id">@' + esc(u.아이디) + '</span>' + delBtn + '</div>' +
@@ -181,9 +193,11 @@ function loadAdminOverview() {
     // 아이디·이름을 onclick 문자열 안에 직접 끼워 넣지 않는다 — esc()는 속성값 이스케이프용이라
     // 작은따옴표(')는 그대로 통과시킨다. 이름에 작은따옴표가 있으면 인라인 onclick이 깨지므로
     // (예: "O'Brien"), data-* 속성에 담아 아래에서 안전하게 읽어온다.
-    el.querySelectorAll('.admin-del-btn').forEach(function (b) {
+    el.querySelectorAll('.admin-del-btn[data-id]').forEach(function (b) {
       b.onclick = function () { deleteUserAccountConfirm(b.dataset.id, b.dataset.name); };
     });
+    var resetBtn = document.getElementById('resetInviteBtn');
+    if (resetBtn) resetBtn.onclick = resetInviteCodeConfirm;
   });
 }
 
@@ -200,6 +214,16 @@ function deleteUserAccountConfirm(id, name) {
     if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
     toast('삭제했어요 (와인 ' + res.deletedWines + '병, 잔 ' + res.deletedGlasses + '개 포함)');
     loadAdminOverview();
+  });
+}
+
+/** 초대 코드를 새로 바꾼다. 이미 있는 셀러에는 영향이 없고, 예전 코드로는 더 이상 새 셀러를 못 만든다. */
+function resetInviteCodeConfirm() {
+  if (!confirm('초대 코드를 새로 바꿀까요? 예전 코드로는 더 이상 새 셀러를 만들 수 없어요. (이미 있는 셀러는 그대로예요)')) return;
+  callAPI(function () { return API.resetInviteCode(); }).then(function (res) {
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
+    document.getElementById('inviteCode').textContent = res.inviteCode;
+    toast('초대 코드를 바꿨어요');
   });
 }
 

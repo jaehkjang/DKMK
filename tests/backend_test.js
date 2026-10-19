@@ -171,6 +171,7 @@ function makeEnv(opts) {
           .replace('HH', p(d.getUTCHours())).replace('mm', p(d.getUTCMinutes())).replace('ss', p(d.getUTCSeconds()));
       },
       sleep: () => {},
+      getUuid: () => crypto.randomUUID(),
     },
     ScriptApp: { getService: () => ({ getUrl: () => '' }) },
   };
@@ -226,8 +227,9 @@ test('배포 후 첫 요청: 컬럼을 바꾸기 전에 백업을 먼저 만들�
   assert.strictEqual(env.drive.copies.length, 1);
 });
 
+// 첫 셀러가 아니면 초대 코드가 필요하다 — 테스트 편의를 위해 현재 코드를 같이 보낸다
 function setupUser(env, name, pw) {
-  const r = env.call('enter', { name, pw });
+  const r = env.call('enter', { name, pw, invite: env.ctx.inviteCode_() });
   assert(r.ok, JSON.stringify(r));
   return r.token;
 }
@@ -303,14 +305,97 @@ test('마시기/되돌리기: 그 사이 행이 바뀌었으면 거절하고 아
   assert(r.ok);
 });
 
-test('비밀번호 5번 틀리면 맞는 비번도 잠시 막히고, 잠금이 풀리면 다시 들어온다', () => {
+test('비밀번호 5번 틀리면 그 뒤로는 1분에 한 번만 시도할 수 있다', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const token = setupUser(env, 'kim', '1234');
+  for (let i = 0; i < 4; i++) assert(/맞지 않아요/.test(env.call('enter', { name: 'kim', pw: '0000' }).error));
+  assert(/1분에 한 번만/.test(env.call('enter', { name: 'kim', pw: '0000' }).error));
+  assert(/초 뒤에 다시/.test(env.call('enter', { name: 'kim', pw: '1234' }).error), '1분 안에는 맞는 비번도 거절');
+  assert.strictEqual(env.call('getWines', { token }).wines.length, 2, '이미 로그인된 기기는 그대로 사용');
+  // 1분이 지난 것으로 만든다
+  const key = Object.keys(env.cache).find(k => k.startsWith('pwfail:'));
+  const st = JSON.parse(env.cache[key]); st.t -= 61000; env.cache[key] = JSON.stringify(st);
+  assert(/맞지 않아요/.test(env.call('enter', { name: 'kim', pw: '0000' }).error), '1분 뒤 한 번 더 시도 가능');
+  assert(/초 뒤에 다시/.test(env.call('enter', { name: 'kim', pw: '1234' }).error), '그 직후는 다시 대기');
+  const st2 = JSON.parse(env.cache[key]); st2.t -= 61000; env.cache[key] = JSON.stringify(st2);
+  assert(env.call('enter', { name: 'kim', pw: '1234' }).ok, '맞는 비번이면 들어오고');
+  assert(!env.cache[key], '실패 기록은 지워진다');
+});
+
+test('새 셀러는 초대 코드가 있어야 만든다 (첫 셀러·기존 셀러는 필요 없음)', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  assert(env.call('enter', { name: 'kim', pw: '1234' }).ok, '첫 셀러는 코드 없이');
+  assert(env.call('enter', { name: 'kim', pw: '1234' }).ok, '기존 셀러 입장은 코드 없이');
+  let r = env.call('enter', { name: 'stranger', pw: '1111' });
+  assert(r.needInvite && /초대 코드/.test(r.error), JSON.stringify(r));
+  r = env.call('enter', { name: 'stranger', pw: '1111', invite: '000000x' });
+  assert(r.needInvite && /맞지 않아요/.test(r.error), JSON.stringify(r));
+  assert(!env.ctx.findUser_('stranger'), '셀러가 만들어지지 않음');
+  const code = env.props.INVITE_CODE;
+  assert(/^\d{6}$/.test(code), '6자리 숫자 코드: ' + code);
+  r = env.call('enter', { name: 'friend', pw: '2222', invite: code });
+  assert(r.ok && r.created, JSON.stringify(r));
+});
+
+test('초대 코드를 10번 틀리면 잠시 새 셀러 생성이 멈춘다', () => {
   const env = makeEnv({ sheets: oldSheets() });
   setupUser(env, 'kim', '1234');
-  for (let i = 0; i < 4; i++) assert(/맞지 않아요/.test(env.call('enter', { name: 'kim', pw: '0000' }).error));
-  assert(/잠겼어요/.test(env.call('enter', { name: 'kim', pw: '0000' }).error));
-  assert(/잠겼어요/.test(env.call('enter', { name: 'kim', pw: '1234' }).error), '잠긴 동안은 맞는 비번도 거절');
-  Object.keys(env.cache).forEach(k => delete env.cache[k]); // 10분 지남
-  assert(env.call('enter', { name: 'kim', pw: '1234' }).ok);
+  for (let i = 0; i < 10; i++) env.call('enter', { name: 'x' + i, pw: '1111', invite: 'bad' });
+  const r = env.call('enter', { name: 'friend', pw: '2222', invite: env.props.INVITE_CODE });
+  assert(/여러 번 틀려서/.test(r.error), JSON.stringify(r));
+  assert(env.call('enter', { name: 'kim', pw: '1234' }).ok, '기존 셀러 입장은 영향 없음');
+});
+
+test('관리자 이름으로는 새 셀러를 못 만들고, 관리자는 스크립트 속성으로 바꿀 수 있다', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  setupUser(env, 'kim', '1234');
+  const r = env.call('enter', { name: 'DKMK', pw: '9999', invite: env.ctx.inviteCode_() });
+  assert(/만들 수 없어요/.test(r.error), JSON.stringify(r));
+  const kim = env.call('enter', { name: 'kim', pw: '1234' });
+  assert.strictEqual(kim.isAdmin, false);
+  assert(/관리자만/.test(env.call('getAdminOverview', { token: kim.token }).error));
+  assert(/관리자만/.test(env.call('resetInviteCode', { token: kim.token }).error));
+  env.props.ADMIN_ID = 'Kim';
+  const kim2 = env.call('enter', { name: 'kim', pw: '1234' });
+  assert.strictEqual(kim2.isAdmin, true);
+  const ov = env.call('getAdminOverview', { token: kim2.token });
+  assert.strictEqual(ov.inviteCode, env.props.INVITE_CODE);
+  assert(ov.users.find(u => u.아이디 === 'kim').관리자);
+  const old = env.props.INVITE_CODE;
+  const rr = env.call('resetInviteCode', { token: kim2.token });
+  assert(rr.ok && /^\d{6}$/.test(rr.inviteCode));
+  assert.strictEqual(env.props.INVITE_CODE, rr.inviteCode);
+  if (rr.inviteCode !== old) assert(/맞지 않아요/.test(env.call('enter', { name: 'newbie', pw: '1111', invite: old }).error), '예전 코드 무효');
+});
+
+test('AI 호출은 셀러마다 하루 한도까지만 (한도는 스크립트 속성으로 조절)', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const token = setupUser(env, 'kim', '1234');
+  env.props.GEMINI_API_KEY = 'k';
+  env.props.AI_DAILY_LIMIT = '2';
+  let calls = 0;
+  const ai = { candidates: [{ content: { parts: [{ text: JSON.stringify({ '서빙온도': '16°C' }) }] } }] };
+  env.ctx.UrlFetchApp.fetch = () => { calls++; return { getResponseCode: () => 200, getContentText: () => JSON.stringify(ai) }; };
+  assert(!env.call('suggestWineInfo', { token, row: 2 }).error);
+  assert(!env.call('suggestWineInfo', { token, row: 3 }).error);
+  const r = env.call('suggestWineInfo', { token, row: 2 });
+  assert(/한도\(2회\)/.test(r.error), JSON.stringify(r));
+  assert.strictEqual(calls, 2, '한도를 넘으면 AI를 부르지 않음');
+  // 다른 셀러는 따로 센다
+  const other = setupUser(env, 'lee', '5555');
+  assert(!env.call('suggestWineInfo', { token: other, row: 4 }).error);
+});
+
+test('난수: Math.random을 쓰지 않고 요청한 길이의 16진수를 만든다', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const M = vm.runInContext('Math', env.ctx);
+  const orig = M.random;
+  M.random = () => { throw new Error('Math.random 사용'); };
+  try {
+    const a = env.ctx.randomHex_(16), b = env.ctx.randomHex_(32);
+    assert(/^[0-9a-f]{32}$/.test(a) && /^[0-9a-f]{64}$/.test(b));
+    assert.notStrictEqual(a, env.ctx.randomHex_(16));
+  } finally { M.random = orig; }
 });
 
 test('비밀번호를 바꾸면 예전 토큰은 무효, 새 토큰은 유효', () => {
