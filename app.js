@@ -70,13 +70,14 @@ function findWine(r) {
  * 다시 하게 돼서 느리고 API 비용도 계속 나갔다. 대신 3개월이 지나면 한 번 더 물어본다
  * (페어링 캐시와 같은 주기).
  */
-// 테이스팅 노트는 이 날짜에 추가됐다. 그 전에 이미 AI에게 물어봐서 "정보갱신일"이 찍힌
-// 와인은 3개월을 기다리지 않고 노트만 채우러 한 번 더 물어본다(그 뒤엔 다시 3개월 주기).
-var TASTING_NOTE_SINCE = '2026-10-16';
+// 테이스팅 노트가 비어 있으면 "정보갱신일"과 상관없이 물어본다. 날짜로 거르면, 서버를
+// 재배포하기 전(노트를 모르는 옛 코드)에 이미 갱신일이 찍힌 와인이 3개월 동안 노트 없이
+// 갇혀버렸다. 대신 같은 와인은 앱을 켠 동안 한 번만 물어서 재호출 루프를 막는다.
+var NOTE_ASKED = {};
 function infoAskDue(w) {
   var stamped = String(w['정보갱신일'] || '');
   if (!stamped) return true;
-  if (!w['테이스팅노트'] && stamped < TASTING_NOTE_SINCE) return true;
+  if (!w['테이스팅노트'] && !NOTE_ASKED[w.rowIndex]) return true;
   var cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - 3);
   var y = cutoff.getFullYear(), m = ('0' + (cutoff.getMonth() + 1)).slice(-2), d = ('0' + cutoff.getDate()).slice(-2);
@@ -232,6 +233,7 @@ function bulkFillWineInfo() {
         return;
       }
       var w = targets[i];
+      NOTE_ASKED[w.rowIndex] = true;
       status.textContent = '업데이트 중… (' + (i + 1) + '/' + targets.length + ') ' + w['와인명'];
       callAPI(function () { return API.suggestWineInfo(w.rowIndex); }).then(function (res) {
         if (!res || res.error) { failed++; lastErr = (res && res.error) || '응답 없음'; }
@@ -753,6 +755,7 @@ function openDetail(r) {
   // 물어본 뒤엔 서버가 "정보갱신일"을 찍어서, AI가 끝내 못 알아낸 와인이라도
   // 상세를 열 때마다 같은 질문을 반복하지 않는다(3개월 뒤 한 번 더 물어봄).
   var needSuggest = infoIncomplete(w) && infoAskDue(w);
+  if (needSuggest) NOTE_ASKED[r] = true;
   var photo = w['라벨사진'] ? '<img src="' + esc(w['라벨사진']) + '" style="width:100%;border-radius:14px;margin:14px 0 4px;">' : '';
   var t = typeStyle(w['종류']);
   document.getElementById('detailBody').innerHTML =
