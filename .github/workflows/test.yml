@@ -1,0 +1,24 @@
+name: 테스트
+
+# PR과 push마다 백엔드(Code.gs) 데이터 보호 테스트와 화면 JS 문법 검사를 돌린다.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 화면 JS 문법 검사
+        run: |
+          node --check api.js
+          node --check app.js
+          node --check sw.js
+          cp Code.gs "$RUNNER_TEMP/Code.js" && node --check "$RUNNER_TEMP/Code.js"
+      - name: 백엔드 테스트
+        run: node tests/backend_test.js

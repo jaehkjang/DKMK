@@ -150,6 +150,7 @@ function openSettings() {
   document.getElementById('pwErr').textContent = '';
   if (!BULK_FILL_RUNNING) document.getElementById('bulkFillStatus').textContent = '';
   loadGlasses();
+  loadDeletedWines();
   document.getElementById('adminSection').style.display = IS_ADMIN ? '' : 'none';
   if (IS_ADMIN) loadAdminOverview();
   om('settingsModal');
@@ -192,13 +193,47 @@ function loadAdminOverview() {
  * 직접 타이핑해서 확인받는다(실수로 잘못 누르는 걸 막으려고).
  */
 function deleteUserAccountConfirm(id, name) {
-  var typed = prompt('"' + name + '"(@' + id + ') 계정과 등록된 와인·잔이 전부 영구 삭제돼요. 되돌릴 수 없어요.\n\n확인하려면 아이디(' + id + ')를 정확히 입력하세요:');
+  var typed = prompt('"' + name + '"(@' + id + ') 계정과 등록된 와인·잔이 전부 앱에서 삭제돼요. 지우기 직전에 시트 전체 백업이 드라이브에 만들어지고, 백업을 못 만들면 삭제하지 않아요.\n\n확인하려면 아이디(' + id + ')를 정확히 입력하세요:');
   if (typed === null) return;
   if (typed.trim().toLowerCase() !== id.toLowerCase()) { toast('아이디가 일치하지 않아 취소했어요'); return; }
   callAPI(function () { return API.deleteUserAccount(id); }).then(function (res) {
     if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
     toast('삭제했어요 (와인 ' + res.deletedWines + '병, 잔 ' + res.deletedGlasses + '개 포함)');
     loadAdminOverview();
+  });
+}
+
+/* ---------- 삭제한 와인(휴지통) ----------
+ * 와인을 삭제해도 서버는 행을 지우지 않고 휴지통으로만 보낸다. 여기서 언제든 되살린다.
+ * 설정을 열 때마다 새로 불러온다 — 방금 지운 와인이 바로 보여야 해서.
+ */
+var DELETED_WINES = [];
+function loadDeletedWines() {
+  var el = document.getElementById('deletedWines');
+  el.innerHTML = '<div class="loading" style="padding:8px 0">불러오는 중…</div>';
+  callAPI(function () { return API.getDeletedWines(); }).then(function (list) {
+    if (!list || list.error) { el.innerHTML = '<div class="note" style="margin:0">' + esc((list && list.error) || '불러오지 못했어요') + '</div>'; return; }
+    DELETED_WINES = list;
+    if (!list.length) { el.innerHTML = '<div class="note" style="margin:0">삭제한 와인이 없어요</div>'; return; }
+    el.innerHTML = list.map(function (w) {
+      return '<div class="admin-row"><div class="admin-row-top"><b>' + esc(w['와인명'] || '(이름 없음)') + '</b>' +
+        (w['빈티지'] ? '<span class="admin-id">' + esc(w['빈티지']) + '</span>' : '') +
+        '<button type="button" class="admin-del-btn restore-btn" data-row="' + w.rowIndex + '">되살리기</button></div>' +
+        '<div class="admin-row-stats">' + esc(w['삭제일']) + ' 삭제 · 되살리면 ' + esc(w['삭제전상태'] === '마심' ? '마신 와인' : '셀러') + '으로 돌아가요</div></div>';
+    }).join('');
+    el.querySelectorAll('.restore-btn').forEach(function (b) {
+      b.onclick = function () { restoreWine(Number(b.dataset.row)); };
+    });
+  });
+}
+function restoreWine(r) {
+  var w = DELETED_WINES.filter(function (x) { return x.rowIndex === r; })[0];
+  if (!w) return;
+  callAPI(function () { return API.restoreWine(r, w['와인명']); }).then(function (res) {
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); loadDeletedWines(); return; }
+    toast('되살렸어요 🍷');
+    loadDeletedWines();
+    load();
   });
 }
 
@@ -325,9 +360,16 @@ function submitChangePw(e) {
   }
   callAPI(function () { return API.changePassword(newPw); }).then(function (res) {
     if (!res || res.error) { err.textContent = (res && res.error) || '문제가 생겼어요'; return; }
+    // 비번을 바꾸면 서버가 예전 토큰을 전부 무효로 만든다(다른 기기는 로그아웃됨).
+    // 이 기기는 새로 받은 토큰으로 갈아끼워서 계속 로그인 상태를 유지한다.
+    if (res.token) {
+      API.setToken(res.token);
+      TOKEN = res.token;
+      if (WINES_LOADED) saveWinesCache();
+    }
     document.getElementById('pwNew').value = '';
     document.getElementById('pwNew2').value = '';
-    toast('비밀번호를 바꿨어요 🔒');
+    toast('비밀번호를 바꿨어요 🔒 다른 기기는 다시 로그인해야 해요');
     cm('settingsModal');
   });
 }
@@ -943,11 +985,11 @@ function shareWine(r) {
   });
 }
 
-/** 실수로 등록한 와인 삭제 (되돌리기 불가라 한 번 더 확인) */
+/** 실수로 등록한 와인 삭제 — 서버는 휴지통으로만 보내서 설정에서 되살릴 수 있다 */
 function deleteWineConfirm(r) {
   var w = findWine(r);
   if (!w) { toast('목록이 바뀌었어요, 새로고침할게요'); load(); return; }
-  if (!confirm((w['와인명'] || '이 와인') + '을(를) 삭제할까요? 되돌릴 수 없어요.')) return;
+  if (!confirm((w['와인명'] || '이 와인') + '을(를) 삭제할까요?\n설정 → 삭제한 와인에서 언제든 되살릴 수 있어요.')) return;
   callAPI(function () { return API.deleteWine(r, w['와인명']); }).then(function (res) {
     if (!res || res.error) {
       toast('실패: ' + ((res && res.error) || ''));
@@ -956,7 +998,7 @@ function deleteWineConfirm(r) {
       return;
     }
     cm('detailModal');
-    toast('삭제했어요');
+    toast('삭제했어요 (설정에서 되살릴 수 있어요)');
     load();
   });
 }
@@ -1105,14 +1147,17 @@ function confirmDrink() {
     '함께한음식': document.getElementById('drinkFood').value,
     '재구매의향': CURRENT_REPURCHASE
   };
-  callAPI(function () { return API.markDrunk(PENDING_ROW, info); }).then(function (res) {
-    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
+  // 와인명을 같이 보내서, 그 사이 행이 밀렸으면 서버가 엉뚱한 와인에 기록하지 않고 거절하게 한다
+  var w = findWine(PENDING_ROW);
+  callAPI(function () { return API.markDrunk(PENDING_ROW, info, w ? w['와인명'] : ''); }).then(function (res) {
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); load(); return; }
     toast('기록했어요 🍷'); cm('drinkModal'); load();
   });
 }
 function doUnmark(r) {
-  callAPI(function () { return API.unmarkDrunk(r); }).then(function (res) {
-    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
+  var w = findWine(r);
+  callAPI(function () { return API.unmarkDrunk(r, w ? w['와인명'] : ''); }).then(function (res) {
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); load(); return; }
     toast('셀러로 되돌렸어요'); load();
   });
 }
@@ -1447,7 +1492,7 @@ function submitAddDrunk(data, photo) {
       load();
       return;
     }
-    return callAPI(function () { return API.markDrunk(row, info); }).then(function (r) {
+    return callAPI(function () { return API.markDrunk(row, info, data['와인명']); }).then(function (r) {
       if (!r || r.error) { fail((r && r.error) || '셀러에는 담겼는데 마신 기록을 못 남겼어요'); load(); return; }
       toast('기록했어요 🍷');
       cm('addModal');
