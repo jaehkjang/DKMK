@@ -30,6 +30,11 @@ jobs:
         with:
           node-version: 20
 
+      # 테스트가 깨진 코드는 배포하지 않는다(데이터를 잘못 쓰는 코드가 실제 시트에 닿지 않게)
+      - name: 백엔드 테스트
+        if: env.READY == 'true'
+        run: node tests/backend_test.js
+
       - if: env.READY == 'true'
         run: npm install -g @google/clasp
 

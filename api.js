@@ -56,9 +56,12 @@ const API = {
   // expectedName: 같은 아이디를 여러 사람이 같이 쓸 때, 그 사이 목록이 밀리지
   // 않았는지 서버가 확인할 수 있게 클라이언트가 보고 있던 와인명을 같이 보낸다.
   updateWine(row, data, photo, expectedName) { return this._post('updateWine', { row, data, photo, expectedName }); },
+  // 삭제는 휴지통으로만 보낸다(행은 남음). 설정 → 삭제한 와인에서 되살린다.
   deleteWine(row, expectedName) { return this._post('deleteWine', { row, expectedName }); },
-  markDrunk(row, info)     { return this._post('markDrunk', { row, info }); },
-  unmarkDrunk(row)         { return this._post('unmarkDrunk', { row }); },
+  restoreWine(row, expectedName) { return this._post('restoreWine', { row, expectedName }); },
+  getDeletedWines()        { return this._get('getDeletedWines'); },
+  markDrunk(row, info, expectedName) { return this._post('markDrunk', { row, info, expectedName }); },
+  unmarkDrunk(row, expectedName)     { return this._post('unmarkDrunk', { row, expectedName }); },
 
   // ── 사진 인식 ──
   recognizeLabel(photo)    { return this._post('recognizeLabel', { photo }); },

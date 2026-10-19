@@ -29,7 +29,10 @@
 
 var NEW_COLUMNS = ['어울리는잔', '서빙방법', '와인배경', '평점', '한줄평', '함께한음식', '라벨사진', '소유자',
   '서빙온도', '에어링시간', '완벽한잔', '완벽한잔별점', '내잔추천', '내잔추천별점', '추천페어링별점', '재구매의향',
-  '베스트페어링', '베스트페어링별점', '정보갱신일', '당도', '산도', '타닌', '바디감', '구매처', '구매가격', '테이스팅노트'];
+  '베스트페어링', '베스트페어링별점', '정보갱신일', '당도', '산도', '타닌', '바디감', '구매처', '구매가격', '테이스팅노트',
+  '삭제일', '삭제전상태'];
+// 와인을 지워도 행은 남기고 상태만 이 값으로 바꾼다(휴지통) — 설정에서 언제든 되살릴 수 있다
+var DELETED_STATUS = '삭제됨';
 var PHOTO_FOLDER_NAME = '와인라벨사진';
 
 /* ===================== API 라우터 ===================== */
@@ -61,6 +64,8 @@ function route_(params) {
   ensureSetup_();
   var action = params.action;
   try {
+    // 데이터를 바꾸는 요청이면 바꾸기 전에 (하루 한 번) 시트 전체 사본을 남긴다. 실패해도 예외를 던지지 않는다.
+    if (WRITE_ACTIONS[action]) ensureRecentBackup_();
     return json_(dispatch_(action, params));
   } catch (err) {
     return json_({ error: err.message || String(err) });
@@ -78,8 +83,10 @@ function dispatch_(action, p) {
     case 'addWines':         return addWines(token, p.list);
     case 'updateWine':       return updateWine(token, p.row, p.data, p.photo, p.expectedName);
     case 'deleteWine':       return deleteWine(token, p.row, p.expectedName);
-    case 'markDrunk':        return markDrunk(token, p.row, p.info);
-    case 'unmarkDrunk':      return unmarkDrunk(token, p.row);
+    case 'restoreWine':      return restoreWine(token, p.row, p.expectedName);
+    case 'getDeletedWines':  return getDeletedWines(token);
+    case 'markDrunk':        return markDrunk(token, p.row, p.info, p.expectedName);
+    case 'unmarkDrunk':      return unmarkDrunk(token, p.row, p.expectedName);
     case 'recognizeLabel':   return recognizeLabel(token, p.photo);
     case 'recognizeCellar':  return recognizeCellar(token, p.photo);
     case 'recommendByFood':  return recommendByFood(token, p.food);
@@ -112,12 +119,30 @@ function setupColumns() {
       sheet.getRange(1, lastCol).setValue(name);
     }
   });
+  setupUserColumns_();
+}
+
+/**
+ * 사용자 시트는 칸 순서(USER_COLUMNS)로 읽고 쓴다. 새 칸이 생기면 비어 있는 제목 칸에만
+ * 이름을 적는다 — 그 자리에 이미 다른 제목이 있으면 덮어쓰지 않고 멈춘다(데이터 보호).
+ */
+function setupUserColumns_() {
+  var sh = userSheet_();
+  var cur = sh.getRange(1, 1, 1, USER_COLUMNS.length).getValues()[0];
+  USER_COLUMNS.forEach(function (name, i) {
+    var have = String(cur[i] || '').trim();
+    if (have === name) return;
+    if (have) throw new Error('사용자 시트 ' + (i + 1) + '번째 칸 제목이 "' + have + '"예요("' + name + '"이어야 해요). 덮어쓰지 않고 멈췄어요');
+    sh.getRange(1, i + 1).setValue(name);
+  });
 }
 
 /** 지금 코드가 기대하는 컬럼 목록의 지문. NEW_COLUMNS가 바뀌면 이 값도 바뀐다. */
 function columnsFingerprint_() {
-  return NEW_COLUMNS.join('|');
+  return NEW_COLUMNS.join('|') + '#' + USER_COLUMNS.join('|');
 }
+
+var SETUP_RETRY_MS = 10 * 60 * 1000; // 자동 설정이 실패하면 10분 동안은 매 요청마다 다시 시도하지 않는다
 
 /**
  * 첫 요청 때 컬럼 설정을 알아서 끝낸다.
@@ -130,17 +155,32 @@ function ensureSetup_() {
   var props = PropertiesService.getScriptProperties();
   var want = columnsFingerprint_();
   if (props.getProperty('SETUP_DONE') === want) return;
+  if (Date.now() - Number(props.getProperty('SETUP_FAIL_AT') || 0) < SETUP_RETRY_MS) return;
+  // 배포 직후 요청 여러 개가 동시에 들어와도 한 번만 맞춘다(예전엔 동시에 컬럼을 두 번 붙일 수 있었다)
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return;
   try {
+    if (props.getProperty('SETUP_DONE') === want) return;
+    // 새 버전 코드가 시트를 처음 건드리기 직전 상태를 버전마다 한 번 남겨 둔다.
+    // 컬럼 맞추기는 빈 칸에 제목만 적는 작업이라, 백업이 실패해도 기존 데이터는 안전하다.
+    if (props.getProperty('BACKUP_BEFORE_SETUP') !== want && backupIfOlderThan_(0, '업데이트 전')) {
+      props.setProperty('BACKUP_BEFORE_SETUP', want);
+    }
     setupColumns();
     props.setProperty('SETUP_DONE', want);
+    props.deleteProperty('SETUP_FAIL_AT');
   } catch (err) {
     // 설정이 실패해도 API는 계속 동작하게 둔다. 원인은 checkSetup으로 확인.
+    props.setProperty('SETUP_FAIL_AT', String(Date.now()));
     Logger.log('자동 설정 실패: ' + err.message);
+  } finally {
+    lock.releaseLock();
   }
 }
 
 /** 수동으로 다시 설정하고 싶을 때 (자동 설정이 실패했을 때 등) */
 function setup() {
+  backupNow_('setup 실행 전');
   setupColumns();
   PropertiesService.getScriptProperties().setProperty('SETUP_DONE', columnsFingerprint_());
   Logger.log('설정 완료. [배포 관리] → 연필(수정) → 버전: 새 버전 → 배포 를 해주세요.');
@@ -174,6 +214,13 @@ function checkSetup() {
     lines.push('시트 연결       : ❌ ' + err.message);
   }
 
+  var lastBackupAt = Number(prop_('LAST_BACKUP_AT') || 0);
+  var tz = Session.getScriptTimeZone() || 'Asia/Seoul';
+  lines.push('마지막 백업     : ' + (lastBackupAt
+    ? Utilities.formatDate(new Date(lastBackupAt), tz, 'yyyy-MM-dd HH:mm') + ' — ' + prop_('LAST_BACKUP_NAME')
+    : '아직 없음 (backupNow를 실행하면 바로 만들어요)'));
+  if (prop_('LAST_BACKUP_ERROR')) lines.push('백업 오류       : ❌ ' + prop_('LAST_BACKUP_ERROR'));
+
   try {
     lines.push('웹 앱 주소      : ' + (ScriptApp.getService().getUrl() || '아직 배포 안 됨'));
   } catch (err) {
@@ -183,6 +230,111 @@ function checkSetup() {
   var out = lines.join('\n');
   Logger.log(out);
   return out;
+}
+
+/* ===================== 백업 =====================
+ * 데이터가 날아가지 않도록, 시트를 바꾸기 전에 스프레드시트 전체 사본을 드라이브의
+ * BACKUP_FOLDER_NAME 폴더에 만들어 둔다.
+ *  - 데이터를 바꾸는 요청(WRITE_ACTIONS)이 오면, 마지막 백업이 하루 넘게 지났을 때 한 번
+ *  - 새 버전 코드가 배포돼 컬럼을 맞추기 직전(ensureSetup_) — 버전마다 한 번
+ *  - 관리자가 계정을 지우기 직전(deleteUserAccount) — 백업이 실패하면 지우지 않는다
+ *  - setup()·backfill 함수를 실행하기 직전, 그리고 편집기에서 backupNow()를 직접 실행할 때
+ * 사본은 공유 설정을 바꾸지 않아서 소유자만 볼 수 있다.
+ * 오래된 사본은 "최근 BACKUP_KEEP개보다 오래됐고 BACKUP_MIN_AGE_DAYS일도 지난 것"만
+ * 드라이브 휴지통으로 보낸다(휴지통에서도 30일은 꺼낼 수 있다).
+ * 복구: 드라이브에서 사본을 열어 필요한 행을 원본에 복사해 붙인다. 사본을 통째로 원본
+ * 대신 쓰려면 스크립트 속성 SHEET_ID를 그 사본의 ID로 바꾼다.
+ */
+var BACKUP_FOLDER_NAME = '와인셀러_백업';
+var BACKUP_PREFIX = '[백업] ';
+var BACKUP_KEEP = 60;
+var BACKUP_MIN_AGE_DAYS = 30;
+var BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+var BACKUP_RETRY_MS = 60 * 60 * 1000; // 실패하면 1시간 동안은 다시 시도하지 않는다(매 요청이 느려지지 않게)
+
+var WRITE_ACTIONS = {
+  addWine: true, addWines: true, updateWine: true, deleteWine: true, restoreWine: true,
+  markDrunk: true, unmarkDrunk: true, changePassword: true,
+  addGlass: true, deleteGlass: true, suggestWineInfo: true
+};
+
+/** 편집기에서 직접 실행하는 수동 백업 */
+function backupNow() {
+  var r = backupNow_('수동');
+  Logger.log('백업 완료: ' + r.name);
+  return r.name;
+}
+
+function backupFolder_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('BACKUP_FOLDER_ID');
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (err) { /* 폴더가 지워졌으면 아래에서 새로 찾는다 */ }
+  }
+  var folders = DriveApp.getFoldersByName(BACKUP_FOLDER_NAME);
+  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(BACKUP_FOLDER_NAME);
+  props.setProperty('BACKUP_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+/** 지금 바로 사본을 만든다. 실패하면 예외를 던진다(지우기 전 백업처럼 꼭 필요한 곳에서 쓰려고). */
+function backupNow_(reason) {
+  var ss = getSS_();
+  var tz = Session.getScriptTimeZone() || 'Asia/Seoul';
+  var name = BACKUP_PREFIX + ss.getName() + ' ' + Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss') +
+    (reason ? ' (' + reason + ')' : '');
+  var copy = DriveApp.getFileById(ss.getId()).makeCopy(name, backupFolder_());
+  var props = PropertiesService.getScriptProperties();
+  props.setProperties({ LAST_BACKUP_AT: String(Date.now()), LAST_BACKUP_NAME: name, LAST_BACKUP_ID: copy.getId() });
+  props.deleteProperty('LAST_BACKUP_ERROR');
+  props.deleteProperty('LAST_BACKUP_FAIL_AT');
+  try { pruneBackups_(); } catch (err) { Logger.log('오래된 백업 정리 실패: ' + err.message); }
+  return { name: name, id: copy.getId() };
+}
+
+/** 마지막 백업이 maxAgeMs보다 오래됐으면 만든다. 예외를 던지지 않고, 만들었으면 true. */
+function backupIfOlderThan_(maxAgeMs, reason) {
+  var props = PropertiesService.getScriptProperties();
+  var now = Date.now();
+  if (now - Number(props.getProperty('LAST_BACKUP_AT') || 0) < maxAgeMs) return false;
+  if (now - Number(props.getProperty('LAST_BACKUP_FAIL_AT') || 0) < BACKUP_RETRY_MS) return false;
+  try {
+    backupNow_(reason);
+    return true;
+  } catch (err) {
+    props.setProperties({ LAST_BACKUP_FAIL_AT: String(now), LAST_BACKUP_ERROR: String(err.message || err).slice(0, 500) });
+    Logger.log('백업 실패: ' + (err.message || err));
+    return false;
+  }
+}
+
+/** 쓰기 요청 앞에서 부른다. 대부분은 속성 두 개만 읽고 바로 끝난다. */
+function ensureRecentBackup_() {
+  var now = Date.now();
+  if (now - Number(prop_('LAST_BACKUP_AT') || 0) < BACKUP_INTERVAL_MS) return;
+  if (now - Number(prop_('LAST_BACKUP_FAIL_AT') || 0) < BACKUP_RETRY_MS) return;
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return;
+  try {
+    backupIfOlderThan_(BACKUP_INTERVAL_MS, '자동'); // 잠금을 기다리는 사이 다른 요청이 만들었으면 건너뛴다
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function pruneBackups_() {
+  var files = backupFolder_().getFiles();
+  var list = [];
+  while (files.hasNext()) {
+    var f = files.next();
+    if (f.getName().indexOf(BACKUP_PREFIX) === 0) list.push(f);
+  }
+  if (list.length <= BACKUP_KEEP) return;
+  list.sort(function (a, b) { return b.getDateCreated().getTime() - a.getDateCreated().getTime(); });
+  var cutoff = Date.now() - BACKUP_MIN_AGE_DAYS * 24 * 60 * 60 * 1000;
+  list.slice(BACKUP_KEEP).forEach(function (f) {
+    if (f.getDateCreated().getTime() < cutoff) f.setTrashed(true);
+  });
 }
 
 /**
@@ -203,6 +355,7 @@ function checkSetup() {
  * 그냥 다시 한번 새로 받아올 뿐이다).
  */
 function backfillKoreaPairing() {
+  backupNow_('backfillKoreaPairing 실행 전'); // 이미 있는 값을 덮어쓰는 함수라 먼저 사본을 남긴다
   var sheet = getSheet_();
   var headers = getHeaders_();
   var lastRow = sheet.getLastRow();
@@ -278,6 +431,7 @@ function requestFoodPairing_(wine) {
  * 안전하다 — 이미 값이 있는 와인은 건너뛴다.
  */
 function backfillWineStyle() {
+  backupNow_('backfillWineStyle 실행 전');
   var sheet = getSheet_();
   var headers = getHeaders_();
   var lastRow = sheet.getLastRow();
@@ -403,10 +557,13 @@ function prop_(key) {
 /* ===================== 계정 ===================== */
 
 var USER_SHEET = '사용자';
-var USER_COLUMNS = ['아이디', '이름', '비번해시', '솔트', '가입일', '마지막로그인'];
+// 칸 순서로 읽고 쓰므로 새 칸은 항상 맨 뒤에만 붙인다(앞에 끼워 넣으면 기존 값이 엉뚱한 칸으로 읽힌다)
+var USER_COLUMNS = ['아이디', '이름', '비번해시', '솔트', '가입일', '마지막로그인', '토큰버전'];
 var OWNER_COLUMN = '소유자';
 var HASH_ROUNDS = 1000;
 var TOKEN_DAYS = 365;
+var PW_MAX_FAILS = 5;            // 비밀번호를 이만큼 연속으로 틀리면
+var PW_LOCK_SECONDS = 10 * 60;   // 이 시간 동안 그 셀러로는 입장을 막는다(4자리 숫자 무차별 대입 방지)
 var ADMIN_ID = 'dkmk'; // 이 아이디로 로그인하면 설정에서 전체 사용자 현황을 볼 수 있다
 
 /** 사용자 시트 (없으면 만든다) */
@@ -492,10 +649,19 @@ function sign_(payload) {
  * 바로 로그아웃되던 원인. 아이디를 encodeURIComponent로 ASCII만 남게 바꾸고 문자셋도
  * UTF-8로 못박는다. 이름에 '|'가 들어가도 칸이 안 밀린다.
  */
-function makeToken_(userId) {
+function makeToken_(userId, ver) {
   var exp = Date.now() + TOKEN_DAYS * 24 * 60 * 60 * 1000;
-  var payload = '2|' + encodeURIComponent(String(userId)) + '|' + exp;
+  var payload = '3|' + encodeURIComponent(String(userId)) + '|' + (Number(ver) || 0) + '|' + exp;
   return Utilities.base64EncodeWebSafe(payload + '|' + sign_(payload), Utilities.Charset.UTF_8);
+}
+
+/**
+ * 사용자의 토큰 버전. 비밀번호를 바꿀 때마다 1씩 올라가고, 토큰에 적힌 버전과 다르면
+ * 그 토큰은 더 이상 안 받는다 — 잃어버린 폰에 남아 있던 로그인이 비번 변경으로 풀리게.
+ * 예전 형식 토큰(버전 없음)과 이 칸이 비어 있는 기존 사용자는 둘 다 0이라 그대로 로그인이 유지된다.
+ */
+function tokenVersion_(user) {
+  return Number(user && user['토큰버전']) || 0;
 }
 
 function verifyToken_(token) {
@@ -503,8 +669,11 @@ function verifyToken_(token) {
   try {
     var raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(String(token))).getDataAsString('UTF-8');
     var parts = raw.split('|');
-    var id, exp, payload, sig;
-    if (parts.length === 4 && parts[0] === '2') {
+    var id, exp, payload, sig, ver = 0;
+    if (parts.length === 5 && parts[0] === '3') {
+      payload = parts.slice(0, 4).join('|');
+      id = decodeURIComponent(parts[1]); ver = Number(parts[2]) || 0; exp = parts[3]; sig = parts[4];
+    } else if (parts.length === 4 && parts[0] === '2') {
       payload = parts[0] + '|' + parts[1] + '|' + parts[2];
       id = decodeURIComponent(parts[1]); exp = parts[2]; sig = parts[3];
     } else if (parts.length === 3) {
@@ -516,7 +685,7 @@ function verifyToken_(token) {
     }
     if (sign_(payload) !== sig) return null;
     if (Number(exp) < Date.now()) return null;
-    return id;
+    return { id: id, ver: ver };
   } catch (err) {
     return null;
   }
@@ -524,11 +693,37 @@ function verifyToken_(token) {
 
 /** 토큰에서 사용자를 꺼낸다. 유효하지 않으면 예외. 모든 데이터 함수의 첫 관문. */
 function requireUser_(token) {
-  var id = verifyToken_(token);
-  if (!id) throw new Error('로그인이 필요해요');
-  var user = findUser_(id);
+  var t = verifyToken_(token);
+  if (!t) throw new Error('로그인이 필요해요');
+  var user = findUser_(t.id);
   if (!user) throw new Error('계정을 찾을 수 없어요');
+  if (t.ver !== tokenVersion_(user)) throw new Error('로그인이 필요해요'); // 비번이 바뀐 뒤의 옛 토큰
   return user;
+}
+
+function pwFailKey_(userId) {
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(userId), Utilities.Charset.UTF_8);
+  return 'pwfail:' + Utilities.base64EncodeWebSafe(digest);
+}
+
+/** 비번 확인 + 연속 실패 잠금. 맞으면 null, 아니면 화면에 보여줄 오류 문구. */
+function checkPassword_(user, pw) {
+  var cache = CacheService.getScriptCache();
+  var key = pwFailKey_(user['아이디']);
+  var fails = Number(cache.get(key) || 0);
+  if (fails >= PW_MAX_FAILS) {
+    return '비밀번호를 ' + PW_MAX_FAILS + '번 틀려서 잠시 잠겼어요. ' + Math.round(PW_LOCK_SECONDS / 60) + '분 뒤에 다시 시도해주세요';
+  }
+  if (hashPw_(pw, user['솔트']) !== user['비번해시']) {
+    fails++;
+    cache.put(key, String(fails), PW_LOCK_SECONDS);
+    var left = PW_MAX_FAILS - fails;
+    return left > 0
+      ? '비밀번호가 맞지 않아요 (' + left + '번 더 틀리면 ' + Math.round(PW_LOCK_SECONDS / 60) + '분 동안 잠겨요)'
+      : '비밀번호를 ' + PW_MAX_FAILS + '번 틀려서 ' + Math.round(PW_LOCK_SECONDS / 60) + '분 동안 잠겼어요';
+  }
+  cache.remove(key);
+  return null;
 }
 
 /** 이름을 조회 키로 정규화 (대소문자·앞뒤 공백 무시 → 같은 셀러로 들어가게) */
@@ -552,11 +747,10 @@ function enter(name, pw) {
 
   var existing = findUser_(key);
   if (existing) {
-    if (hashPw_(pw, existing['솔트']) !== existing['비번해시']) {
-      return { error: '비밀번호가 맞지 않아요' };
-    }
+    var pwErr = checkPassword_(existing, pw);
+    if (pwErr) return { error: pwErr };
     userSheet_().getRange(existing.rowIndex, USER_COLUMNS.indexOf('마지막로그인') + 1).setValue(todayStr_());
-    return { ok: true, token: makeToken_(key), name: String(existing['이름']), created: false, id: key, isAdmin: key === ADMIN_ID };
+    return { ok: true, token: makeToken_(key, tokenVersion_(existing)), name: String(existing['이름']), created: false, id: key, isAdmin: key === ADMIN_ID };
   }
 
   var lock = LockService.getScriptLock();
@@ -569,8 +763,9 @@ function enter(name, pw) {
     // 잠금을 잡는 사이에 누가 먼저 만들었을 수 있다
     var again = findUser_(key);
     if (again) {
-      if (hashPw_(pw, again['솔트']) !== again['비번해시']) return { error: '비밀번호가 맞지 않아요' };
-      return { ok: true, token: makeToken_(key), name: String(again['이름']), created: false, id: key, isAdmin: key === ADMIN_ID };
+      var againErr = checkPassword_(again, pw);
+      if (againErr) return { error: againErr };
+      return { ok: true, token: makeToken_(key, tokenVersion_(again)), name: String(again['이름']), created: false, id: key, isAdmin: key === ADMIN_ID };
     }
 
     var isFirst = userRows_().length === 0;
@@ -580,12 +775,12 @@ function enter(name, pw) {
     var ush = userSheet_();
     var newRow = ush.getLastRow() + 1;
     ush.getRange(newRow, 1, 1, 4).setNumberFormat('@');
-    ush.getRange(newRow, 1, 1, USER_COLUMNS.length).setValues([[key, display, hashPw_(pw, salt), salt, todayStr_(), todayStr_()]]);
+    ush.getRange(newRow, 1, 1, USER_COLUMNS.length).setValues([[key, display, hashPw_(pw, salt), salt, todayStr_(), todayStr_(), 0]]);
 
     // 첫 셀러라면 소유자가 비어 있던 기존 와인을 넘겨받는다
     var moved = isFirst ? claimOrphanWines_(key) : 0;
 
-    return { ok: true, token: makeToken_(key), name: display, created: true, moved: moved, id: key, isAdmin: key === ADMIN_ID };
+    return { ok: true, token: makeToken_(key, 0), name: display, created: true, moved: moved, id: key, isAdmin: key === ADMIN_ID };
   } finally {
     lock.releaseLock();
   }
@@ -619,11 +814,15 @@ function changePassword(token, newPw) {
   if (!/^\d{4}$/.test(newPw)) return { error: '새 비밀번호는 4자리 숫자로 입력해주세요' };
 
   var salt = randomHex_(16);
+  var ver = tokenVersion_(user) + 1;
   var sheet = userSheet_();
-  sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('비번해시') + 1, 1, 2).setNumberFormat('@'); // 솔트가 숫자로 바뀌지 않게
-  sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('비번해시') + 1).setValue(hashPw_(newPw, salt));
-  sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('솔트') + 1).setValue(salt);
-  return { ok: true };
+  // 비번해시·솔트는 붙어 있는 두 칸이라 한 번에 쓴다(하나만 바뀌고 끊기면 그 계정은 다시 못 들어온다)
+  sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('비번해시') + 1, 1, 2)
+    .setNumberFormat('@') // 솔트가 숫자로 바뀌지 않게
+    .setValues([[hashPw_(newPw, salt), salt]]);
+  // 토큰 버전을 올려서 다른 기기에 남아 있던 로그인을 끊는다. 지금 이 기기는 새 토큰으로 바로 갈아낀다.
+  sheet.getRange(user.rowIndex, USER_COLUMNS.indexOf('토큰버전') + 1).setValue(ver);
+  return { ok: true, token: makeToken_(String(user['아이디']), ver) };
 }
 
 /**
@@ -634,11 +833,12 @@ function changePassword(token, newPw) {
  * 예외를 그대로 던져 {error}로 가게 한다(앱은 로그인 상태를 유지한 채 알림만 띄운다).
  */
 function checkToken(token) {
-  var id = verifyToken_(token);
-  if (!id) return { ok: false };
-  var user = findUser_(id);
+  var t = verifyToken_(token);
+  if (!t) return { ok: false };
+  var user = findUser_(t.id);
   if (!user) return { ok: false };
-  id = String(user['아이디']);
+  if (t.ver !== tokenVersion_(user)) return { ok: false };
+  var id = String(user['아이디']);
   return { ok: true, name: String(user['이름']), id: id, isAdmin: id === ADMIN_ID };
 }
 
@@ -670,10 +870,13 @@ function getAdminOverview(token) {
   var addedIdx = headers.indexOf('등록일');
 
   var byOwner = {};
+  var totalWines = 0;
   if (lastRow >= 2) {
     var values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
     values.forEach(function (row) {
       var owner = ownerIdx !== -1 ? String(row[ownerIdx]).trim() : '';
+      if (statusIdx !== -1 && row[statusIdx] === DELETED_STATUS) return; // 휴지통은 세지 않는다
+      totalWines++;
       if (!owner) return;
       if (!byOwner[owner]) byOwner[owner] = { 보유: 0, 마심: 0, 마지막활동: '' };
       var stat = byOwner[owner];
@@ -699,7 +902,7 @@ function getAdminOverview(token) {
 
   return {
     totalUsers: users.length,
-    totalWines: lastRow >= 2 ? lastRow - 1 : 0,
+    totalWines: totalWines,
     users: users
   };
 }
@@ -740,6 +943,13 @@ function deleteUserAccount(token, targetId) {
   var target = findUser_(targetId);
   if (!target) return { error: '없는 사용자예요' };
 
+  // 되돌릴 수 없는 삭제라 직전에 시트 전체 사본을 반드시 남긴다. 사본을 못 만들면 지우지 않는다.
+  try {
+    backupNow_('계정 삭제 전 ' + targetId);
+  } catch (err) {
+    return { error: '백업을 만들지 못해서 삭제를 멈췄어요: ' + (err.message || err) };
+  }
+
   var wineHeaders = getHeaders_();
   var deletedWines = deleteRowsWhereColumnEquals_(getSheet_(), wineHeaders.indexOf(OWNER_COLUMN), targetId, 1);
   var deletedGlasses = deleteRowsWhereColumnEquals_(glassSheet_(), GLASS_COLUMNS.indexOf('소유자'), targetId, 1);
@@ -765,12 +975,15 @@ function getWines(token) {
 
   var values = all.slice(1);
   var ownerIdx = headers.indexOf(OWNER_COLUMN);
+  var statusIdx = headers.indexOf('상태');
   var tz = Session.getScriptTimeZone() || 'Asia/Seoul';
   var wines = [];
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
     // 남의 와인은 아예 내려보내지 않는다
     if (ownerIdx !== -1 && String(row[ownerIdx]).trim() !== me) continue;
+    // 휴지통에 있는 와인은 셀러·기록·추천 어디에도 안 보인다(설정 → 삭제한 와인에서만 보임)
+    if (statusIdx !== -1 && row[statusIdx] === DELETED_STATUS) continue;
     var obj = { rowIndex: i + 2 };
     for (var c = 0; c < headers.length; c++) {
       var v = row[c];
@@ -781,14 +994,23 @@ function getWines(token) {
   return { headers: headers, wines: wines };
 }
 
-/** 이 행이 정말 내 것인지 확인하고 시트를 돌려준다 (행 번호를 바꿔치기한 요청 차단) */
-function requireOwnedRow_(me, rowIndex) {
+/**
+ * 이 행이 정말 내 것인지 확인하고 시트를 돌려준다 (행 번호를 바꿔치기한 요청 차단).
+ * 휴지통에 있는 와인은 되살리기(allowDeleted) 말고는 손대지 못하게 막는다.
+ */
+function requireOwnedRow_(me, rowIndex, allowDeleted) {
   var sheet = getSheet_();
   rowIndex = Number(rowIndex);
   if (!rowIndex || rowIndex < 2 || rowIndex > sheet.getLastRow()) throw new Error('없는 와인이에요');
-  var col = colIndex1_(getHeaders_(), OWNER_COLUMN);
-  if (String(sheet.getRange(rowIndex, col).getValue()).trim() !== me) {
+  var headers = getHeaders_();
+  var col = colIndex1_(headers, OWNER_COLUMN);
+  var row = sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
+  if (String(row[col - 1]).trim() !== me) {
     throw new Error('내 와인이 아니에요');
+  }
+  var statusIdx = headers.indexOf('상태');
+  if (!allowDeleted && statusIdx !== -1 && row[statusIdx] === DELETED_STATUS) {
+    throw new Error('삭제된 와인이에요. 새로고침 후 다시 시도해주세요');
   }
   return sheet;
 }
@@ -825,9 +1047,16 @@ function addWine(token, data, photoDataUrl) {
     if (h === OWNER_COLUMN) return me;
     return (data && data[h]) || '';
   });
-  sheet.appendRow(row);
-  // 새 행 번호 — 기록 탭에서 마신 와인을 바로 추가할 때 이어서 markDrunk를 부르는 데 쓴다
-  return { ok: true, rowIndex: sheet.getLastRow() };
+  // 붙이기와 새 행 번호 읽기 사이에 다른 사람이 끼어들면 남의 행 번호를 돌려줄 수 있어서 잠근다
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) throw new Error('잠시 후 다시 시도해주세요');
+  try {
+    sheet.appendRow(row);
+    // 새 행 번호 — 기록 탭에서 마신 와인을 바로 추가할 때 이어서 markDrunk를 부르는 데 쓴다
+    return { ok: true, rowIndex: sheet.getLastRow() };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /** 잘못 등록된 정보를 고칠 수 있는 필드. 상태/등록일/마신날짜/소유자처럼
@@ -867,13 +1096,73 @@ function resolvePhotoUrl_(photoDataUrl, name) {
   return savePhoto_(photoDataUrl, name);
 }
 
-/** 실수로 등록한 와인 삭제. expectedName은 updateWine과 같은 이유로 쓰는 안전장치. */
+/**
+ * 실수로 등록한 와인 삭제. 행을 지우지 않고 휴지통(상태=삭제됨)으로만 보낸다 —
+ * 데이터가 실제로 사라지지 않고, 아래 행 번호들도 밀리지 않는다. 원래 상태(보유/마심)는
+ * '삭제전상태'에 남겨 두고 restoreWine으로 그대로 되살린다.
+ * expectedName은 updateWine과 같은 이유로 쓰는 안전장치.
+ */
 function deleteWine(token, rowIndex, expectedName) {
   var me = String(requireUser_(token)['아이디']);
   var sheet = requireOwnedRow_(me, rowIndex);
-  assertRowStillMatches_(sheet, getHeaders_(), Number(rowIndex), expectedName);
-  sheet.deleteRow(Number(rowIndex));
+  var headers = getHeaders_();
+  rowIndex = Number(rowIndex);
+  assertRowStillMatches_(sheet, headers, rowIndex, expectedName);
+  // 컬럼을 먼저 다 찾아 둔다 — 하나라도 없으면 아무것도 쓰기 전에 멈춘다
+  var statusCol = colIndex1_(headers, '상태');
+  var prevCol = colIndex1_(headers, '삭제전상태');
+  var dateCol = colIndex1_(headers, '삭제일');
+  var prev = String(sheet.getRange(rowIndex, statusCol).getValue() || '').trim() || '보유';
+  sheet.getRange(rowIndex, prevCol).setValue(prev);
+  sheet.getRange(rowIndex, dateCol).setValue(todayStr_());
+  sheet.getRange(rowIndex, statusCol).setValue(DELETED_STATUS);
   return { ok: true };
+}
+
+/** 휴지통에 있는 와인을 지우기 전 상태(보유/마심)로 되살린다 */
+function restoreWine(token, rowIndex, expectedName) {
+  var me = String(requireUser_(token)['아이디']);
+  var sheet = requireOwnedRow_(me, rowIndex, true);
+  var headers = getHeaders_();
+  rowIndex = Number(rowIndex);
+  assertRowStillMatches_(sheet, headers, rowIndex, expectedName);
+  var statusCol = colIndex1_(headers, '상태');
+  var prevCol = colIndex1_(headers, '삭제전상태');
+  var dateCol = colIndex1_(headers, '삭제일');
+  if (sheet.getRange(rowIndex, statusCol).getValue() !== DELETED_STATUS) return { ok: true, already: true };
+  var prev = String(sheet.getRange(rowIndex, prevCol).getValue() || '').trim();
+  if (!prev || prev === DELETED_STATUS) prev = '보유';
+  sheet.getRange(rowIndex, statusCol).setValue(prev);
+  sheet.getRange(rowIndex, prevCol).setValue('');
+  sheet.getRange(rowIndex, dateCol).setValue('');
+  return { ok: true, status: prev };
+}
+
+/** 내 휴지통 목록 (최근에 지운 순) */
+function getDeletedWines(token) {
+  var me = String(requireUser_(token)['아이디']);
+  var all = getSheet_().getDataRange().getValues();
+  var headers = all[0] || [];
+  var ownerIdx = headers.indexOf(OWNER_COLUMN);
+  var statusIdx = headers.indexOf('상태');
+  if (statusIdx === -1) return [];
+  var pick = function (row, h) { var i = headers.indexOf(h); return i === -1 ? '' : row[i]; };
+  var out = [];
+  for (var i = 1; i < all.length; i++) {
+    var row = all[i];
+    if (row[statusIdx] !== DELETED_STATUS) continue;
+    if (ownerIdx !== -1 && String(row[ownerIdx]).trim() !== me) continue;
+    out.push({
+      rowIndex: i + 1,
+      '와인명': String(pick(row, '와인명') || ''),
+      '빈티지': String(pick(row, '빈티지') || ''),
+      '종류': String(pick(row, '종류') || ''),
+      '삭제전상태': String(pick(row, '삭제전상태') || '보유'),
+      '삭제일': fmtDateMaybe_(pick(row, '삭제일'))
+    });
+  }
+  out.sort(function (a, b) { return String(b['삭제일']).localeCompare(String(a['삭제일'])) || b.rowIndex - a.rowIndex; });
+  return out;
 }
 
 /* ===================== 내 잔 ===================== */
@@ -1042,7 +1331,15 @@ function suggestWineInfo(token, rowIndex) {
   // 지금은 행을 한 번 다시 읽어 메모리에서 고친 뒤 한 번에 되쓴다(읽기 1 + 쓰기 1).
   // 다시 읽는 이유: 위 Gemini 호출에 몇 초가 걸려서, 그 사이 사용자가 수정 화면에서
   // 직접 채웠을 수 있다 — 그 값을 덮어쓰지 않으려고 가장 최신 상태를 기준으로 판단한다.
-  var fresh = sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
+  var freshRange = sheet.getRange(rowIndex, 1, 1, headers.length);
+  var fresh = freshRange.getValues()[0];
+  // AI를 기다리는 사이 그 행이 다른 와인으로 바뀌었으면(행이 밀림) 엉뚱한 와인에 쓰지 않는다
+  var nameIdx = headers.indexOf('와인명');
+  if (nameIdx !== -1 && String(fresh[nameIdx]).trim() !== String(row[nameIdx]).trim()) {
+    throw new Error('그 사이 목록이 바뀌었어요. 새로고침 후 다시 시도해주세요');
+  }
+  // 행 전체를 되쓰기 때문에, 수식이 있는 칸은 계산 결과가 아니라 수식 그대로 되돌려 쓴다
+  var formulas = freshRange.getFormulas()[0];
   var out = {};
   var changed = false;
   Object.keys(updates).forEach(function (h) {
@@ -1064,7 +1361,10 @@ function suggestWineInfo(token, rowIndex) {
     changed = true;
   }
 
-  if (changed) sheet.getRange(rowIndex, 1, 1, headers.length).setValues([fresh]);
+  if (changed) {
+    formulas.forEach(function (f, i) { if (f) fresh[i] = f; });
+    freshRange.setValues([fresh]);
+  }
   return out;
 }
 
@@ -1253,18 +1553,26 @@ function addWines(token, list) {
       return c[h] || '';
     });
   });
-  var start = sheet.getLastRow() + 1;
-  sheet.getRange(start, 1, rows.length, headers.length).setValues(rows);
-  // 새 행 번호들 — 클라이언트가 이어서 suggestWineInfo로 테이스팅 노트 등을 채우는 데 쓴다
-  var rowIndexes = rows.map(function (r, i) { return start + i; });
-  return { added: rows.length, rowIndexes: rowIndexes };
+  // 마지막 행 번호를 읽고 그 아래에 쓰는 사이에 다른 추가가 끼어들면 남의 행을 덮어쓸 수 있어서 잠근다
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) throw new Error('잠시 후 다시 시도해주세요');
+  try {
+    var start = sheet.getLastRow() + 1;
+    sheet.getRange(start, 1, rows.length, headers.length).setValues(rows);
+    // 새 행 번호들 — 클라이언트가 이어서 suggestWineInfo로 테이스팅 노트 등을 채우는 데 쓴다
+    var rowIndexes = rows.map(function (r, i) { return start + i; });
+    return { added: rows.length, rowIndexes: rowIndexes };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
-/** 마심 표시: 상태→마심, 마신날짜/평점/한줄평/함께한음식 기록 */
-function markDrunk(token, rowIndex, info) {
+/** 마심 표시: 상태→마심, 마신날짜/평점/한줄평/함께한음식 기록. expectedName은 updateWine과 같은 안전장치. */
+function markDrunk(token, rowIndex, info, expectedName) {
   var me = String(requireUser_(token)['아이디']);
   var sheet = requireOwnedRow_(me, rowIndex);
   var headers = getHeaders_();
+  assertRowStillMatches_(sheet, headers, Number(rowIndex), expectedName);
   sheet.getRange(rowIndex, colIndex1_(headers, '상태')).setValue('마심');
   sheet.getRange(rowIndex, colIndex1_(headers, '마신날짜')).setValue(todayStr_());
   if (info) {
@@ -1277,10 +1585,11 @@ function markDrunk(token, rowIndex, info) {
 }
 
 /** 마심 취소(되돌리기) */
-function unmarkDrunk(token, rowIndex) {
+function unmarkDrunk(token, rowIndex, expectedName) {
   var me = String(requireUser_(token)['아이디']);
   var sheet = requireOwnedRow_(me, rowIndex);
   var headers = getHeaders_();
+  assertRowStillMatches_(sheet, headers, Number(rowIndex), expectedName);
   sheet.getRange(rowIndex, colIndex1_(headers, '상태')).setValue('보유');
   sheet.getRange(rowIndex, colIndex1_(headers, '마신날짜')).setValue('');
   return { ok: true };
