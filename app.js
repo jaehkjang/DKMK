@@ -1125,7 +1125,47 @@ function recPostHtml(group) {
     (more.length
       ? '<div class="rec-more-head">➕ 추가 추천 ' + more.length + '</div>' + more.map(recEntryHtml).join('')
       : '') +
+    recDrankHtml(group) +
     '</div>';
+}
+
+/**
+ * 게시글 아래 "🍷 나도 마셨어요" 버튼(좋아요처럼 눌렀다 뗐다). 내가 추천한 게시글은 이미
+ * 마신 와인이라 버튼 없이 누가 마셨는지만 보여준다.
+ */
+function recDrankHtml(group) {
+  var first = group.entries[0];
+  var names = first['마셨어요'] || [];
+  var byMe = !!first.drankByMe;
+  var iRecommended = group.entries.some(function (e) { return e.mine; });
+  var who = names.length
+    ? '<span class="rec-drank-who">' + esc(names.slice(0, 5).join(', ')) + (names.length > 5 ? ' 외 ' + (names.length - 5) + '명' : '') + '</span>'
+    : '';
+  var btn = iRecommended
+    ? (names.length ? '<span class="rec-drank-btn static">🍷 마셨어요 ' + names.length + '</span>' : '')
+    : '<button type="button" class="rec-drank-btn' + (byMe ? ' on' : '') + '" onclick="event.stopPropagation();toggleDrank(' + first.rowIndex + ')">' +
+      '🍷 ' + (byMe ? '마셨어요' : '나도 마셨어요') + (names.length ? ' ' + names.length : '') + '</button>';
+  if (!btn && !who) return '';
+  return '<div class="rec-drank">' + btn + who + '</div>';
+}
+
+var DRANK_BUSY = {};
+function toggleDrank(recRow) {
+  var x = null;
+  ALL_RECS.forEach(function (y) { if (y.rowIndex === recRow) x = y; });
+  if (!x || DRANK_BUSY[x['묶음키']]) return;
+  var key = x['묶음키'];
+  DRANK_BUSY[key] = true;
+  callAPI(function () { return API.toggleDrankRec(x.rowIndex, x['와인명']); }).then(function (res) {
+    delete DRANK_BUSY[key];
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); loadRecs(); return; }
+    // 같은 게시글(묶음)의 모든 추천 줄에 똑같이 반영한다
+    ALL_RECS.forEach(function (y) {
+      if (y['묶음키'] === key) { y['마셨어요'] = res['마셨어요'] || []; y.drankByMe = !!res.drank; }
+    });
+    renderRecList();
+    toast(res.drank ? '마셨어요 🍷' : '마셨어요를 취소했어요');
+  });
 }
 
 function renderRecList() {
