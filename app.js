@@ -149,6 +149,7 @@ function submitAuth(ev) {
     if (res.moved) toast('기존 와인 ' + res.moved + '병을 가져왔어요');
     else if (res.created) toast(res.name + ' 셀러를 만들었어요 🍾');
     load();
+    loadRecs();
   });
 }
 
@@ -529,6 +530,7 @@ function bootstrap() {
       AUTH_RECOVERY_SHOWN = false;
       document.getElementById('pinScreen').style.display = 'none';
       if (WINES_LOADED) saveWinesCache();
+      loadRecs(); // 마신 와인 상세에서 "추천함"을 바로 표시할 수 있게
     } else if (res && res.ok === false) {
       // 서버가 "이 토큰은 무효"라고 분명히 답한 경우에만 로그아웃
       logout('다시 들어와주세요');
@@ -568,6 +570,7 @@ function logout(msg) {
   clearWinesCache();
   FOOD_REQUIRED_HTML = '';
   GLASSES_LOADED = false; MY_GLASSES = [];
+  RECS_LOADED = false; ALL_RECS = [];
   document.querySelectorAll('.modal-bg').forEach(function (m) { m.classList.remove('on'); });
   document.getElementById('pinScreen').style.display = '';
   document.getElementById('pinErr').textContent = msg || '';
@@ -589,9 +592,9 @@ function handleAuthExpired() {
 }
 
 /* ---------- 화면 전환 ---------- */
-var TITLES = { Cellar:'셀러', Food:'페어링 추천', Stat:'기록' };
+var TITLES = { Cellar:'셀러', Food:'페어링 추천', Rec:'추천', Stat:'기록' };
 function showPage(p) {
-  ['Cellar', 'Food', 'Stat'].forEach(function (n) {
+  ['Cellar', 'Food', 'Rec', 'Stat'].forEach(function (n) {
     document.getElementById('pg' + n).classList.toggle('on', n === p);
   });
   document.querySelectorAll('#tabbar div').forEach(function (t) { t.classList.toggle('on', t.dataset.p === p); });
@@ -607,6 +610,7 @@ function showPage(p) {
     renderCellarPairingChips();
     renderFoodRequired();
   }
+  if (p === 'Rec') { if (RECS_LOADED) renderRecList(); loadRecs(); }
   window.scrollTo(0, 0);
 }
 
@@ -834,6 +838,7 @@ function openDetail(r) {
     '<div id="servingBox">' + (servingFactsHtml(w) || (needSuggest ? '<div class="note" id="servingSuggest" style="margin-top:12px">🍷 부족한 정보 AI로 채우는 중…</div>' : '')) + '</div>' +
     '<div class="act-row" style="margin-top:14px">' +
     '<button class="act" onclick="shareWine(' + r + ')"><span class="ic">🔗</span>공유</button>' +
+    (w['상태'] === '마심' ? '<button class="act" onclick="openRecModal(' + r + ')"><span class="ic">💌</span><span id="detailRecLabel">' + (myRecFor(w) ? '추천함' : '추천') + '</span></button>' : '') +
     '<button class="act" onclick="startEdit(' + r + ')"><span class="ic">✏️</span>수정</button>' +
     '<button class="act" onclick="deleteWineConfirm(' + r + ')"><span class="ic">🗑</span>삭제</button>' +
     '</div>' +
@@ -1007,6 +1012,128 @@ function shareWine(r) {
     if (err && err.name === 'AbortError') return;
     shareTextOnly();
   });
+}
+
+/* ---------- 와인 추천 (모든 셀러가 같이 보는 탭) ---------- */
+var ALL_RECS = [];
+var RECS_LOADED = false;
+var REC_ROW = null; // 추천 창을 연 내 와인 행
+
+function loadRecs() {
+  var token = TOKEN;
+  callAPI(function () { return API.getRecommendations(); }).then(function (d) {
+    if (token !== TOKEN) return;
+    if (!Array.isArray(d)) {
+      if (RECS_LOADED) { toast('추천 목록을 못 불러왔어요: ' + ((d && d.error) || '')); return; }
+      document.getElementById('recListArea').innerHTML = '<div class="empty"><span class="big">😵</span>불러오지 못했어요<br>' + esc(d && d.error) + '</div>';
+      return;
+    }
+    ALL_RECS = d; RECS_LOADED = true; renderRecList(); syncDetailRecLabel();
+  });
+}
+
+/** 열려 있는 상세 창의 추천 버튼 글자만 최신 추천 목록에 맞춘다 */
+function syncDetailRecLabel() {
+  var el = document.getElementById('detailRecLabel');
+  if (el) el.textContent = myRecFor(findWine(DETAIL_ROW)) ? '추천함' : '추천';
+}
+
+/** 내 와인(마신 와인)에 대해 이미 올린 추천 — 와인 행과 와인명이 둘 다 맞아야 같은 와인 */
+function myRecFor(w) {
+  if (!w) return null;
+  for (var i = 0; i < ALL_RECS.length; i++) {
+    var x = ALL_RECS[i];
+    if (x.mine && Number(x['와인행']) === w.rowIndex && x['와인명'] === String(w['와인명'] || '').trim()) return x;
+  }
+  return null;
+}
+
+function recMatches(x, q) {
+  if (!q) return true;
+  return [x['와인명'], x['품종'], x['종류'], x['생산지/국가'], x['추천인이름'], x['추천글']].join(' ').toLowerCase().indexOf(q) !== -1;
+}
+
+function recCardHtml(x) {
+  var t = typeStyle(x['종류']);
+  var flag = countryFlag(x);
+  var countryText = (x['생산지/국가'] || '').split('/').pop();
+  var bits = [x['빈티지'], countryText ? (flag ? flag + ' ' + countryText : countryText) : ''].filter(Boolean);
+  var sub = bits.length ? '<span class="dot">' + esc(bits.join(' · ')) + '</span>' : '';
+  var grape = x['품종'] ? '<span class="dot">' + esc(String(x['품종']).split(/[·,]/)[0]) + '</span>' : '';
+  var thumb = x['라벨사진'] ? '<img class="card-thumb" src="' + esc(x['라벨사진']) + '" alt="" loading="lazy" decoding="async">' : '';
+  var stars = x['평점'] ? '<span class="stars">' + starsHtml(x['평점']) + '</span> ' : '';
+  var comment = (stars || x['추천글']) ? '<div class="reason">' + stars + esc(x['추천글'] || '') + '</div>' : '';
+  var who = '<span class="when">💌 ' + esc(x['추천인이름']) + (x.mine ? ' (나)' : '') + ' · ' + esc(x['추천일']) + '</span>';
+  var btn = x.canCancel ? '<button class="undo-btn" onclick="event.stopPropagation();cancelRec(' + x.rowIndex + ')">추천 내리기</button>' : '';
+  return '<div class="card" style="--c:' + t.c + ';--c-soft:' + t.s + '">' +
+    '<div class="card-head">' + thumb +
+    '<div class="card-head-text">' +
+    '<div class="name">' + esc(x['와인명']) + '</div>' +
+    '<div class="line"><span class="tag">' + esc(t.n) + '</span>' + grape + sub + '</div>' +
+    '</div></div>' + comment +
+    '<div class="foot">' + who + btn + '</div>' +
+    '</div>';
+}
+
+function renderRecList() {
+  var area = document.getElementById('recListArea');
+  if (!RECS_LOADED) { area.innerHTML = '<div class="loading">불러오는 중…</div>'; return; }
+  var q = (document.getElementById('recSearch').value || '').trim().toLowerCase();
+  var items = [];
+  ALL_RECS.forEach(function (x) { if (recMatches(x, q)) items.push(recCardHtml(x)); });
+  if (document.getElementById('pgRec').classList.contains('on')) {
+    document.getElementById('pgCount').textContent = items.length ? items.length + '개' : '';
+  }
+  area.innerHTML = items.length ? items.join('') : (q
+    ? '<div class="empty"><span class="big">🔍</span>찾는 추천이 없어요</div>'
+    : '<div class="empty"><span class="big">💌</span>아직 추천이 없어요<br>마신 와인의 상세에서 <b>추천</b>을 눌러 첫 추천을 남겨보세요</div>');
+}
+
+function openRecModal(r) {
+  var w = findWine(r); if (!w) return;
+  REC_ROW = r;
+  var mine = myRecFor(w);
+  document.getElementById('recTitle').textContent = '💌 ' + (w['와인명'] || '') + ' 추천';
+  document.getElementById('recComment').value = mine ? (mine['추천글'] || '') : (w['한줄평'] || '');
+  document.getElementById('recBtn').textContent = mine ? '추천글 고치기' : '추천하기';
+  document.getElementById('recCancelBtn').style.display = mine ? '' : 'none';
+  om('recModal');
+  if (!RECS_LOADED) loadRecs();
+}
+
+function submitRecommend() {
+  var r = REC_ROW, w = findWine(r); if (!w) return;
+  var btn = document.getElementById('recBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  var comment = document.getElementById('recComment').value;
+  callAPI(function () { return API.recommendWine(r, comment, w['와인명']); }).then(function (res) {
+    btn.disabled = false;
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); return; }
+    toast(res.updated ? '추천글을 고쳤어요 💌' : '추천 탭에 올렸어요 💌');
+    cm('recModal');
+    loadRecs();
+  });
+}
+
+/** recRow: 추천 시트 행 번호 — 목록이 그 사이 새로 불려와도 엉뚱한 추천을 가리키지 않게 행 번호로 찾는다 */
+function cancelRec(recRow) {
+  var x = null;
+  ALL_RECS.forEach(function (y) { if (y.rowIndex === recRow) x = y; });
+  if (!x) return;
+  if (!confirm('"' + x['와인명'] + '" 추천을 내릴까요?')) return;
+  callAPI(function () { return API.cancelRecommendation(x.rowIndex, x['와인명']); }).then(function (res) {
+    if (!res || res.error) { toast('실패: ' + ((res && res.error) || '')); loadRecs(); return; }
+    toast('추천을 내렸어요');
+    ALL_RECS = ALL_RECS.filter(function (y) { return y !== x; }); renderRecList(); syncDetailRecLabel(); loadRecs();
+  });
+}
+
+function cancelMyRecFromModal() {
+  var w = findWine(REC_ROW), mine = myRecFor(w);
+  if (!mine) { cm('recModal'); return; }
+  cm('recModal');
+  cancelRec(mine.rowIndex);
 }
 
 /** 실수로 등록한 와인 삭제 — 서버는 휴지통으로만 보내서 설정에서 되살릴 수 있다 */

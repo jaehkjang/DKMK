@@ -80,6 +80,13 @@ const API = {
   addGlass(name)            { return this._post('addGlass', { name }); },
   deleteGlass(row)          { return this._post('deleteGlass', { row }); },
   suggestWineInfo(row)      { return this._post('suggestWineInfo', { row }); },
+
+  // ── 와인 추천 공유 (모든 셀러가 같이 보는 추천 탭) ──
+  getRecommendations()      { return this._get('getRecommendations'); },
+  // row: 내 와인 행, expectedName: 그 사이 행이 밀리지 않았는지 확인용 와인명
+  recommendWine(row, comment, expectedName) { return this._post('recommendWine', { row, comment, expectedName }); },
+  // row: 추천 시트의 행(목록에서 받은 rowIndex)
+  cancelRecommendation(row, expectedName)   { return this._post('cancelRecommendation', { row, expectedName }); },
 };
 
 // 네트워크 자체가 끊긴 경우를 잡아주는 안전 래퍼. 서버가 돌려준 {error} 는 그대로 통과시킨다.
