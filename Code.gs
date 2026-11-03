@@ -98,6 +98,9 @@ function dispatch_(action, p) {
     case 'addGlass':         return addGlass(token, p.name);
     case 'deleteGlass':      return deleteGlass(token, p.row);
     case 'suggestWineInfo':  return suggestWineInfo(token, p.row);
+    case 'getRecommendations':   return getRecommendations(token);
+    case 'recommendWine':        return recommendWine(token, p.row, p.comment, p.expectedName, p.price, p.again);
+    case 'cancelRecommendation': return cancelRecommendation(token, p.row, p.expectedName);
     default: throw new Error('알 수 없는 요청이에요: ' + action);
   }
 }
@@ -256,7 +259,8 @@ var BACKUP_RETRY_MS = 60 * 60 * 1000; // 실패하면 1시간 동안은 다시 �
 var WRITE_ACTIONS = {
   addWine: true, addWines: true, updateWine: true, deleteWine: true, restoreWine: true,
   markDrunk: true, unmarkDrunk: true, changePassword: true,
-  addGlass: true, deleteGlass: true, suggestWineInfo: true
+  addGlass: true, deleteGlass: true, suggestWineInfo: true,
+  recommendWine: true, cancelRecommendation: true
 };
 
 /** 편집기에서 직접 실행하는 수동 백업 */
@@ -1044,6 +1048,9 @@ function deleteUserAccount(token, targetId) {
   var deletedWines = deleteRowsWhereColumnEquals_(getSheet_(), wineHeaders.indexOf(OWNER_COLUMN), targetId, 1);
   var deletedGlasses = deleteRowsWhereColumnEquals_(glassSheet_(), GLASS_COLUMNS.indexOf('소유자'), targetId, 1);
   deleteRowsWhereColumnEquals_(pairingCacheSheet_(), PAIRING_CACHE_COLUMNS.indexOf('소유자'), targetId, 1);
+  // 추천 시트는 제목 칸 검사 없이 그대로 찾는다(검사에서 멈추면 지우다 만 상태가 되므로)
+  var recSh = getSS_().getSheetByName(REC_SHEET);
+  if (recSh) deleteRowsWhereColumnEquals_(recSh, REC_COLUMNS.indexOf('추천인'), targetId, 1);
 
   // 다른 함수들 실행 도중 target.rowIndex가 가리키던 사용자 시트 자체는 안 바뀌니
   // (와인/잔/캐시는 다른 시트) 처음 찾은 rowIndex 그대로 지워도 안전하다.
@@ -1253,6 +1260,239 @@ function getDeletedWines(token) {
   }
   out.sort(function (a, b) { return String(b['삭제일']).localeCompare(String(a['삭제일'])) || b.rowIndex - a.rowIndex; });
   return out;
+}
+
+/* ===================== 와인 추천 공유 =====================
+ * 마신 와인을 "추천"하면 모든 셀러가 같이 보는 추천 탭에 올라간다.
+ * 셀러끼리는 서로의 와인 시트 행을 볼 수 없으니, 추천할 때 와인 정보(이름·종류·품종 등)를
+ * 별도 시트에 그 순간의 사본으로 적어 둔다 — 남의 와인 행을 내려보내지 않는다.
+ *  - 행을 지우지 않는다: 추천 취소는 상태=취소됨으로만 표시한다(계정 삭제 때만 지움).
+ *  - 칸 순서(REC_COLUMNS)로 읽고 쓰므로 새 칸은 항상 맨 뒤에 추가한다.
+ *  - 같은 와인(와인명+빈티지)의 추천은 한 게시글로 묶는다. 처음 올린 추천이 게시글이 되고,
+ *    그 뒤의 추천(다른 사람이든 같은 사람이 다시 추천했든)은 그 아래 "추가 추천"으로 붙는다.
+ *    기존 추천을 덮어쓰지 않고 항상 새 줄로 남긴다.
+ *  - 내가 이미 추천한 와인을 다시 추천하면 먼저 "이미 추천했어요"로 알려주고,
+ *    again=true로 다시 보낼 때만 추가 추천으로 올린다.
+ *  - 추천할 때는 구매가격(원) 또는 "선물받음"이 꼭 있어야 한다.
+ */
+var REC_SHEET = '추천공유';
+var REC_COLUMNS = ['추천일', '추천인', '추천인이름', '와인행', '와인명', '종류', '품종', '빈티지',
+  '생산지/국가', '평점', '추천글', '라벨사진', '상태', '취소일', '구매가격'];
+var REC_ACTIVE = '추천';
+var REC_CANCELED = '취소됨';
+var REC_COMMENT_MAX = 300;
+var REC_LIST_MAX = 300;
+var GIFT_PRICE = '선물받음';
+
+/**
+ * 추천 시트에 글자를 적을 때, "="·"+"·"-"·"@"로 시작하면 시트가 수식으로 실행하지 않도록
+ * 앞에 작은따옴표를 붙여 글자로 저장한다(추천글은 다른 사람이 쓴 글이 들어가는 칸이라서).
+ */
+function asText_(v) {
+  return (typeof v === 'string' && /^[=+\-@]/.test(v)) ? "'" + v : v;
+}
+
+/** 다른 셀러에게 보여줄 라벨 사진은 이 앱이 드라이브에 올린 주소만 허용한다(외부 추적 이미지 방지) */
+function safePhotoUrl_(v) {
+  var s = String(v || '').trim();
+  return /^https:\/\/(lh3\.googleusercontent\.com|drive\.google\.com)\//.test(s) ? s : '';
+}
+
+/** 같은 와인인지 묶는 기준: 와인명(대소문자·공백 차이 무시) + 빈티지 */
+function recGroupKey_(name, vintage) {
+  return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim() + '|' + String(vintage || '').trim();
+}
+
+/**
+ * 추천에 쓰는 구매가격을 정리한다. "선물받음"이거나 0보다 큰 숫자(원)만 받는다.
+ * "38,000원"·"38000 원"처럼 적어도 숫자만 남긴다. 맞지 않으면 빈 문자열.
+ */
+function normRecPrice_(v) {
+  var s = String(v === undefined || v === null ? '' : v).trim();
+  if (!s) return '';
+  if (s.replace(/\s+/g, '') === GIFT_PRICE) return GIFT_PRICE;
+  var digits = s.replace(/[,\s원]/g, '');
+  if (!/^\d+$/.test(digits) || Number(digits) <= 0) return '';
+  return String(Number(digits));
+}
+
+/** 추천 시트 (없으면 만든다). 이미 있으면 비어 있는 제목 칸만 채우고, 다른 제목이 있으면 멈춘다. */
+function recSheet_() {
+  var ss = getSS_();
+  var sh = ss.getSheetByName(REC_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(REC_SHEET);
+    sh.getRange(1, 1, 1, REC_COLUMNS.length).setValues([REC_COLUMNS]);
+    sh.hideSheet();
+    return sh;
+  }
+  var cur = sh.getRange(1, 1, 1, REC_COLUMNS.length).getValues()[0];
+  REC_COLUMNS.forEach(function (name, i) {
+    var have = String(cur[i] || '').trim();
+    if (have === name) return;
+    if (have) throw new Error('추천 시트 ' + (i + 1) + '번째 칸 제목이 "' + have + '"예요("' + name + '"이어야 해요). 덮어쓰지 않고 멈췄어요');
+    sh.getRange(1, i + 1).setValue(name);
+  });
+  return sh;
+}
+
+function recRows_(sh) {
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var values = sh.getRange(2, 1, last - 1, REC_COLUMNS.length).getValues();
+  return values.map(function (r, i) {
+    var o = { rowIndex: i + 2 };
+    REC_COLUMNS.forEach(function (c, j) { o[c] = r[j]; });
+    return o;
+  });
+}
+
+/** 모든 셀러가 올린 추천 목록 (최근 순). 내 추천에는 mine:true가 붙는다. */
+function getRecommendations(token) {
+  var meUser = requireUser_(token);
+  var me = String(meUser['아이디']);
+  var isAdmin = me === adminId_();
+  var rows = recRows_(recSheet_()).filter(function (r) { return r['상태'] === REC_ACTIVE; });
+  if (!rows.length) return [];
+
+  // 이름은 사용자 시트의 지금 이름을 우선 쓴다(추천 뒤에 이름이 바뀌어도 맞게)
+  var names = {};
+  userRows_().forEach(function (u) { names[String(u['아이디']).trim()] = String(u['이름'] || ''); });
+
+  // 추천한 사람이 원래 와인을 휴지통으로 보냈으면 추천도 안 보인다(되살리면 다시 보임).
+  // 와인 행 번호가 밀렸을 수도 있으니 와인명·소유자가 그대로일 때만 상태를 믿는다.
+  var all = getSheet_().getDataRange().getValues();
+  var headers = all[0] || [];
+  var nameIdx = headers.indexOf('와인명'), ownerIdx = headers.indexOf(OWNER_COLUMN), statusIdx = headers.indexOf('상태');
+  function sourceDeleted(r) {
+    if (nameIdx === -1 || ownerIdx === -1 || statusIdx === -1) return false;
+    var src = all[Number(r['와인행']) - 1];
+    if (!src || Number(r['와인행']) < 2) return false;
+    if (String(src[nameIdx]).trim() !== String(r['와인명']).trim()) return false;
+    if (String(src[ownerIdx]).trim() !== String(r['추천인']).trim()) return false;
+    return src[statusIdx] === DELETED_STATUS;
+  }
+
+  var out = [];
+  rows.forEach(function (r) {
+    if (sourceDeleted(r)) return;
+    var who = String(r['추천인']).trim();
+    out.push({
+      rowIndex: r.rowIndex,
+      '추천일': fmtDateMaybe_(r['추천일']),
+      '추천인이름': names[who] || String(r['추천인이름'] || '') || who,
+      '와인명': String(r['와인명'] || ''),
+      '종류': String(r['종류'] || ''),
+      '품종': String(r['품종'] || ''),
+      '빈티지': String(r['빈티지'] || ''),
+      '생산지/국가': String(r['생산지/국가'] || ''),
+      '평점': r['평점'] === '' ? '' : Number(r['평점']) || '',
+      '추천글': String(r['추천글'] || ''),
+      '라벨사진': safePhotoUrl_(r['라벨사진']),
+      '구매가격': String(r['구매가격'] === undefined ? '' : r['구매가격']),
+      '묶음키': recGroupKey_(r['와인명'], r['빈티지']),
+      // 내 추천에만 원래 와인 행을 알려준다(상세 화면에서 "이미 추천함"을 표시하려고)
+      '와인행': who === me ? Number(r['와인행']) : '',
+      mine: who === me,
+      canCancel: who === me || isAdmin
+    });
+  });
+  out.sort(function (a, b) { return String(b['추천일']).localeCompare(String(a['추천일'])) || b.rowIndex - a.rowIndex; });
+  return out.slice(0, REC_LIST_MAX);
+}
+
+/**
+ * 내가 마신 와인을 추천 탭에 올린다. 기존 추천은 절대 덮어쓰지 않고 항상 새 줄로 남긴다.
+ *  - price: 구매가격(원) 또는 "선물받음". 안 보내면(예전 화면) 와인에 적힌 구매가격을 쓰고,
+ *    그것도 없으면 거절한다. 와인의 구매가격 칸이 비어 있을 때만 그 값을 와인에도 적어 둔다.
+ *  - 내가 이 와인을 이미 추천했으면 again이 true일 때만 올리고, 아니면 alreadyRecommended로 알려준다.
+ *  - 다른 사람이 같은 와인을 이미 추천했으면 그 게시글의 추가 추천이 된다(addedTo로 알려줌).
+ * expectedName은 updateWine과 같은 안전장치(그 사이 행이 밀렸으면 거절).
+ */
+function recommendWine(token, rowIndex, comment, expectedName, price, again) {
+  var meUser = requireUser_(token);
+  var me = String(meUser['아이디']);
+  var sheet = requireOwnedRow_(me, rowIndex);
+  var headers = getHeaders_();
+  rowIndex = Number(rowIndex);
+  assertRowStillMatches_(sheet, headers, rowIndex, expectedName);
+  // 새 API라 예전 화면이 없다 — 행이 밀려 엉뚱한 와인이 공유되지 않게 와인명 확인을 필수로 한다
+  if (expectedName === undefined || expectedName === null || String(expectedName).trim() === '') {
+    return { error: '화면을 새로고침한 뒤 다시 시도해주세요' };
+  }
+  var row = sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
+  var pick = function (h) { var i = headers.indexOf(h); return i === -1 ? '' : row[i]; };
+  if (pick('상태') !== '마심') return { error: '마신 와인만 추천할 수 있어요' };
+  var wineName = String(pick('와인명') || '').trim();
+  if (!wineName) return { error: '와인 이름이 없어요' };
+  var givenPrice = price !== undefined && price !== null && String(price).trim() !== '';
+  var recPrice = normRecPrice_(givenPrice ? price : pick('구매가격'));
+  if (!recPrice) {
+    return { error: givenPrice ? '구매가격은 숫자(원)로 적거나 "선물받음"을 골라주세요' : '추천하려면 구매가격을 적어주세요(선물받았으면 "선물받음")', needPrice: true };
+  }
+  comment = String(comment || '').trim().slice(0, REC_COMMENT_MAX);
+  var rating = pick('평점');
+  var key = recGroupKey_(wineName, pick('빈티지'));
+  again = again === true || again === 'true';
+
+  var sh = recSheet_();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) throw new Error('잠시 후 다시 시도해주세요');
+  try {
+    var active = recRows_(sh).filter(function (r) { return r['상태'] === REC_ACTIVE; });
+    var sameWine = active.filter(function (r) { return recGroupKey_(r['와인명'], r['빈티지']) === key; });
+    var mineBefore = sameWine.filter(function (r) { return String(r['추천인']).trim() === me; });
+    if (mineBefore.length && !again) {
+      return {
+        error: '이미 추천한 와인이에요', alreadyRecommended: true,
+        count: mineBefore.length, lastDate: fmtDateMaybe_(mineBefore[mineBefore.length - 1]['추천일'])
+      };
+    }
+    var rec = {
+      '추천일': todayStr_(), '추천인': me, '추천인이름': String(meUser['이름'] || ''), '와인행': rowIndex,
+      '와인명': wineName, '종류': pick('종류'), '품종': pick('품종'), '빈티지': pick('빈티지'),
+      '생산지/국가': pick('생산지/국가'), '평점': rating, '추천글': comment, '라벨사진': pick('라벨사진'),
+      '상태': REC_ACTIVE, '취소일': '', '구매가격': recPrice
+    };
+    sh.appendRow(REC_COLUMNS.map(function (c) { return asText_(rec[c] instanceof Date ? fmtDateMaybe_(rec[c]) : rec[c]); }));
+    var newRow = sh.getLastRow();
+
+    // 와인의 구매가격 칸이 비어 있으면(수식도 없으면) 이번에 적은 값을 와인에도 남긴다 — 있는 값은 안 바꾼다
+    var priceCol = headers.indexOf('구매가격') + 1;
+    var savedToWine = false;
+    if (givenPrice && priceCol > 0 && String(pick('구매가격')).trim() === '') {
+      // 쓰기 직전에 그 행이 아직 같은 와인이고 칸이 여전히 비어 있는지 다시 확인한다
+      assertRowStillMatches_(sheet, headers, rowIndex, wineName);
+      var cell = sheet.getRange(rowIndex, priceCol);
+      if (!cell.getFormulas()[0][0] && String(cell.getValues()[0][0]).trim() === '') {
+        cell.setValue(recPrice); savedToWine = true;
+      }
+    }
+    return {
+      ok: true, rowIndex: newRow, price: recPrice, savedPriceToWine: savedToWine,
+      addedTo: sameWine.length ? true : false, again: mineBefore.length > 0
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** 추천 취소(행은 남기고 상태만 취소됨). 내 추천만, 관리자는 누구 것이든 내릴 수 있다. */
+function cancelRecommendation(token, recRow, expectedName) {
+  var me = String(requireUser_(token)['아이디']);
+  var sh = recSheet_();
+  recRow = Number(recRow);
+  if (!recRow || recRow < 2 || recRow > sh.getLastRow()) throw new Error('없는 추천이에요');
+  var r = recRows_(sh)[recRow - 2];
+  if (String(r['추천인']).trim() !== me && me !== adminId_()) throw new Error('내 추천이 아니에요');
+  if (expectedName === undefined || expectedName === null || String(expectedName).trim() === '' ||
+      String(r['와인명']).trim() !== String(expectedName).trim()) {
+    throw new Error('그 사이 목록이 바뀌었어요. 새로고침 후 다시 시도해주세요');
+  }
+  if (r['상태'] !== REC_ACTIVE) return { ok: true, already: true };
+  sh.getRange(recRow, REC_COLUMNS.indexOf('상태') + 1).setValue(REC_CANCELED);
+  sh.getRange(recRow, REC_COLUMNS.indexOf('취소일') + 1).setValue(todayStr_());
+  return { ok: true };
 }
 
 /* ===================== 내 잔 ===================== */

