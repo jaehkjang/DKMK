@@ -84,7 +84,11 @@ const API = {
   // ── 와인 추천 공유 (모든 셀러가 같이 보는 추천 탭) ──
   getRecommendations()      { return this._get('getRecommendations'); },
   // row: 내 와인 행, expectedName: 그 사이 행이 밀리지 않았는지 확인용 와인명
-  recommendWine(row, comment, expectedName) { return this._post('recommendWine', { row, comment, expectedName }); },
+  // price: 구매가격(원) 또는 '선물받음' — 꼭 있어야 한다
+  // again: 이미 추천한 와인을 알고 다시 올릴 때 true(기존 추천은 그대로, 추가 추천으로 붙음)
+  recommendWine(row, comment, expectedName, price, again) {
+    return this._post('recommendWine', { row, comment, expectedName, price, again: !!again });
+  },
   // row: 추천 시트의 행(목록에서 받은 rowIndex)
   cancelRecommendation(row, expectedName)   { return this._post('cancelRecommendation', { row, expectedName }); },
 };

@@ -99,7 +99,7 @@ function dispatch_(action, p) {
     case 'deleteGlass':      return deleteGlass(token, p.row);
     case 'suggestWineInfo':  return suggestWineInfo(token, p.row);
     case 'getRecommendations':   return getRecommendations(token);
-    case 'recommendWine':        return recommendWine(token, p.row, p.comment, p.expectedName);
+    case 'recommendWine':        return recommendWine(token, p.row, p.comment, p.expectedName, p.price, p.again);
     case 'cancelRecommendation': return cancelRecommendation(token, p.row, p.expectedName);
     default: throw new Error('알 수 없는 요청이에요: ' + action);
   }
@@ -1268,15 +1268,39 @@ function getDeletedWines(token) {
  * 별도 시트에 그 순간의 사본으로 적어 둔다 — 남의 와인 행을 내려보내지 않는다.
  *  - 행을 지우지 않는다: 추천 취소는 상태=취소됨으로만 표시한다(계정 삭제 때만 지움).
  *  - 칸 순서(REC_COLUMNS)로 읽고 쓰므로 새 칸은 항상 맨 뒤에 추가한다.
- *  - 같은 와인을 다시 추천하면 새 줄을 만들지 않고 내 추천글·별점만 고친다.
+ *  - 같은 와인(와인명+빈티지)의 추천은 한 게시글로 묶는다. 처음 올린 추천이 게시글이 되고,
+ *    그 뒤의 추천(다른 사람이든 같은 사람이 다시 추천했든)은 그 아래 "추가 추천"으로 붙는다.
+ *    기존 추천을 덮어쓰지 않고 항상 새 줄로 남긴다.
+ *  - 내가 이미 추천한 와인을 다시 추천하면 먼저 "이미 추천했어요"로 알려주고,
+ *    again=true로 다시 보낼 때만 추가 추천으로 올린다.
+ *  - 추천할 때는 구매가격(원) 또는 "선물받음"이 꼭 있어야 한다.
  */
 var REC_SHEET = '추천공유';
 var REC_COLUMNS = ['추천일', '추천인', '추천인이름', '와인행', '와인명', '종류', '품종', '빈티지',
-  '생산지/국가', '평점', '추천글', '라벨사진', '상태', '취소일'];
+  '생산지/국가', '평점', '추천글', '라벨사진', '상태', '취소일', '구매가격'];
 var REC_ACTIVE = '추천';
 var REC_CANCELED = '취소됨';
 var REC_COMMENT_MAX = 300;
 var REC_LIST_MAX = 300;
+var GIFT_PRICE = '선물받음';
+
+/** 같은 와인인지 묶는 기준: 와인명(대소문자·공백 차이 무시) + 빈티지 */
+function recGroupKey_(name, vintage) {
+  return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim() + '|' + String(vintage || '').trim();
+}
+
+/**
+ * 추천에 쓰는 구매가격을 정리한다. "선물받음"이거나 0보다 큰 숫자(원)만 받는다.
+ * "38,000원"·"38000 원"처럼 적어도 숫자만 남긴다. 맞지 않으면 빈 문자열.
+ */
+function normRecPrice_(v) {
+  var s = String(v === undefined || v === null ? '' : v).trim();
+  if (!s) return '';
+  if (s.replace(/\s+/g, '') === GIFT_PRICE) return GIFT_PRICE;
+  var digits = s.replace(/[,\s원]/g, '');
+  if (!/^\d+$/.test(digits) || Number(digits) <= 0) return '';
+  return String(Number(digits));
+}
 
 /** 추천 시트 (없으면 만든다). 이미 있으면 비어 있는 제목 칸만 채우고, 다른 제목이 있으면 멈춘다. */
 function recSheet_() {
@@ -1351,6 +1375,8 @@ function getRecommendations(token) {
       '평점': r['평점'] === '' ? '' : Number(r['평점']) || '',
       '추천글': String(r['추천글'] || ''),
       '라벨사진': String(r['라벨사진'] || ''),
+      '구매가격': String(r['구매가격'] === undefined ? '' : r['구매가격']),
+      '묶음키': recGroupKey_(r['와인명'], r['빈티지']),
       // 내 추천에만 원래 와인 행을 알려준다(상세 화면에서 "이미 추천함"을 표시하려고)
       '와인행': who === me ? Number(r['와인행']) : '',
       mine: who === me,
@@ -1362,10 +1388,14 @@ function getRecommendations(token) {
 }
 
 /**
- * 내가 마신 와인을 추천 탭에 올린다. 이미 올린 와인이면 추천글·별점만 고친다.
+ * 내가 마신 와인을 추천 탭에 올린다. 기존 추천은 절대 덮어쓰지 않고 항상 새 줄로 남긴다.
+ *  - price: 구매가격(원) 또는 "선물받음". 안 보내면(예전 화면) 와인에 적힌 구매가격을 쓰고,
+ *    그것도 없으면 거절한다. 와인의 구매가격 칸이 비어 있을 때만 그 값을 와인에도 적어 둔다.
+ *  - 내가 이 와인을 이미 추천했으면 again이 true일 때만 올리고, 아니면 alreadyRecommended로 알려준다.
+ *  - 다른 사람이 같은 와인을 이미 추천했으면 그 게시글의 추가 추천이 된다(addedTo로 알려줌).
  * expectedName은 updateWine과 같은 안전장치(그 사이 행이 밀렸으면 거절).
  */
-function recommendWine(token, rowIndex, comment, expectedName) {
+function recommendWine(token, rowIndex, comment, expectedName, price, again) {
   var meUser = requireUser_(token);
   var me = String(meUser['아이디']);
   var sheet = requireOwnedRow_(me, rowIndex);
@@ -1377,30 +1407,49 @@ function recommendWine(token, rowIndex, comment, expectedName) {
   if (pick('상태') !== '마심') return { error: '마신 와인만 추천할 수 있어요' };
   var wineName = String(pick('와인명') || '').trim();
   if (!wineName) return { error: '와인 이름이 없어요' };
+  var givenPrice = price !== undefined && price !== null && String(price).trim() !== '';
+  var recPrice = normRecPrice_(givenPrice ? price : pick('구매가격'));
+  if (!recPrice) {
+    return { error: givenPrice ? '구매가격은 숫자(원)로 적거나 "선물받음"을 골라주세요' : '추천하려면 구매가격을 적어주세요(선물받았으면 "선물받음")', needPrice: true };
+  }
   comment = String(comment || '').trim().slice(0, REC_COMMENT_MAX);
   var rating = pick('평점');
+  var key = recGroupKey_(wineName, pick('빈티지'));
+  again = again === true || again === 'true';
 
   var sh = recSheet_();
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) throw new Error('잠시 후 다시 시도해주세요');
   try {
-    var mine = recRows_(sh).filter(function (r) {
-      return r['상태'] === REC_ACTIVE && String(r['추천인']).trim() === me &&
-        Number(r['와인행']) === rowIndex && String(r['와인명']).trim() === wineName;
-    })[0];
-    if (mine) {
-      sh.getRange(mine.rowIndex, REC_COLUMNS.indexOf('추천글') + 1).setValue(comment);
-      sh.getRange(mine.rowIndex, REC_COLUMNS.indexOf('평점') + 1).setValue(rating);
-      return { ok: true, updated: true, rowIndex: mine.rowIndex };
+    var active = recRows_(sh).filter(function (r) { return r['상태'] === REC_ACTIVE; });
+    var sameWine = active.filter(function (r) { return recGroupKey_(r['와인명'], r['빈티지']) === key; });
+    var mineBefore = sameWine.filter(function (r) { return String(r['추천인']).trim() === me; });
+    if (mineBefore.length && !again) {
+      return {
+        error: '이미 추천한 와인이에요', alreadyRecommended: true,
+        count: mineBefore.length, lastDate: fmtDateMaybe_(mineBefore[mineBefore.length - 1]['추천일'])
+      };
     }
     var rec = {
       '추천일': todayStr_(), '추천인': me, '추천인이름': String(meUser['이름'] || ''), '와인행': rowIndex,
       '와인명': wineName, '종류': pick('종류'), '품종': pick('품종'), '빈티지': pick('빈티지'),
       '생산지/국가': pick('생산지/국가'), '평점': rating, '추천글': comment, '라벨사진': pick('라벨사진'),
-      '상태': REC_ACTIVE, '취소일': ''
+      '상태': REC_ACTIVE, '취소일': '', '구매가격': recPrice
     };
     sh.appendRow(REC_COLUMNS.map(function (c) { return rec[c] instanceof Date ? fmtDateMaybe_(rec[c]) : rec[c]; }));
-    return { ok: true, updated: false, rowIndex: sh.getLastRow() };
+    var newRow = sh.getLastRow();
+
+    // 와인의 구매가격 칸이 비어 있으면(수식도 없으면) 이번에 적은 값을 와인에도 남긴다 — 있는 값은 안 바꾼다
+    var priceCol = headers.indexOf('구매가격') + 1;
+    var savedToWine = false;
+    if (givenPrice && priceCol > 0 && String(pick('구매가격')).trim() === '') {
+      var cell = sheet.getRange(rowIndex, priceCol);
+      if (!cell.getFormulas()[0][0]) { cell.setValue(recPrice); savedToWine = true; }
+    }
+    return {
+      ok: true, rowIndex: newRow, price: recPrice, savedPriceToWine: savedToWine,
+      addedTo: sameWine.length ? true : false, again: mineBefore.length > 0
+    };
   } finally {
     lock.releaseLock();
   }
