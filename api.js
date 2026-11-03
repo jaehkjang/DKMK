@@ -91,6 +91,8 @@ const API = {
   },
   // row: 추천 시트의 행(목록에서 받은 rowIndex)
   cancelRecommendation(row, expectedName)   { return this._post('cancelRecommendation', { row, expectedName }); },
+  // 추천 게시글에 "나도 마셨어요" 표시/취소(토글). row: 그 게시글의 추천 한 줄
+  toggleDrankRec(row, expectedName)         { return this._post('toggleDrankRec', { row, expectedName }); },
 };
 
 // 네트워크 자체가 끊긴 경우를 잡아주는 안전 래퍼. 서버가 돌려준 {error} 는 그대로 통과시킨다.

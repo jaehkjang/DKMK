@@ -101,6 +101,7 @@ function dispatch_(action, p) {
     case 'getRecommendations':   return getRecommendations(token);
     case 'recommendWine':        return recommendWine(token, p.row, p.comment, p.expectedName, p.price, p.again);
     case 'cancelRecommendation': return cancelRecommendation(token, p.row, p.expectedName);
+    case 'toggleDrankRec':       return toggleDrankRec(token, p.row, p.expectedName);
     default: throw new Error('알 수 없는 요청이에요: ' + action);
   }
 }
@@ -260,7 +261,7 @@ var WRITE_ACTIONS = {
   addWine: true, addWines: true, updateWine: true, deleteWine: true, restoreWine: true,
   markDrunk: true, unmarkDrunk: true, changePassword: true,
   addGlass: true, deleteGlass: true, suggestWineInfo: true,
-  recommendWine: true, cancelRecommendation: true
+  recommendWine: true, cancelRecommendation: true, toggleDrankRec: true
 };
 
 /** 편집기에서 직접 실행하는 수동 백업 */
@@ -1051,6 +1052,8 @@ function deleteUserAccount(token, targetId) {
   // 추천 시트는 제목 칸 검사 없이 그대로 찾는다(검사에서 멈추면 지우다 만 상태가 되므로)
   var recSh = getSS_().getSheetByName(REC_SHEET);
   if (recSh) deleteRowsWhereColumnEquals_(recSh, REC_COLUMNS.indexOf('추천인'), targetId, 1);
+  var drankSh = getSS_().getSheetByName(DRANK_SHEET);
+  if (drankSh) deleteRowsWhereColumnEquals_(drankSh, DRANK_COLUMNS.indexOf('사용자'), targetId, 1);
 
   // 다른 함수들 실행 도중 target.rowIndex가 가리키던 사용자 시트 자체는 안 바뀌니
   // (와인/잔/캐시는 다른 시트) 처음 찾은 rowIndex 그대로 지워도 안전하다.
@@ -1373,10 +1376,15 @@ function getRecommendations(token) {
     return src[statusIdx] === DELETED_STATUS;
   }
 
+  // "나도 마셨어요" — 게시글(같은 와인 묶음)마다 누가 눌렀는지
+  var drank = drankByGroup_();
+
   var out = [];
   rows.forEach(function (r) {
     if (sourceDeleted(r)) return;
     var who = String(r['추천인']).trim();
+    var key = recGroupKey_(r['와인명'], r['빈티지']);
+    var drankIds = drank[key] || [];
     out.push({
       rowIndex: r.rowIndex,
       '추천일': fmtDateMaybe_(r['추천일']),
@@ -1390,7 +1398,9 @@ function getRecommendations(token) {
       '추천글': String(r['추천글'] || ''),
       '라벨사진': safePhotoUrl_(r['라벨사진']),
       '구매가격': String(r['구매가격'] === undefined ? '' : r['구매가격']),
-      '묶음키': recGroupKey_(r['와인명'], r['빈티지']),
+      '묶음키': key,
+      '마셨어요': drankIds.map(function (id) { return names[id] || id; }),
+      drankByMe: drankIds.indexOf(me) !== -1,
       // 내 추천에만 원래 와인 행을 알려준다(상세 화면에서 "이미 추천함"을 표시하려고)
       '와인행': who === me ? Number(r['와인행']) : '',
       mine: who === me,
@@ -1493,6 +1503,104 @@ function cancelRecommendation(token, recRow, expectedName) {
   sh.getRange(recRow, REC_COLUMNS.indexOf('상태') + 1).setValue(REC_CANCELED);
   sh.getRange(recRow, REC_COLUMNS.indexOf('취소일') + 1).setValue(todayStr_());
   return { ok: true };
+}
+
+/* ===================== 추천 게시글 "나도 마셨어요" =====================
+ * 추천 탭의 게시글(같은 와인 묶음)에 좋아요처럼 "나도 마셨어요"를 눌러 둔다.
+ *  - 행을 지우지 않는다: 다시 누르면(취소) 상태=취소됨으로만 바꾸고, 또 누르면 새 줄을 붙인다.
+ *  - 칸 순서(DRANK_COLUMNS)로 읽고 쓰므로 새 칸은 항상 맨 뒤에 추가한다.
+ *  - 내 와인 시트(셀러·기록)는 건드리지 않는다.
+ */
+var DRANK_SHEET = '추천마셨어요';
+var DRANK_COLUMNS = ['묶음키', '와인명', '사용자', '상태', '날짜', '취소일'];
+var DRANK_ACTIVE = '마심';
+
+function drankSheet_() {
+  var ss = getSS_();
+  var sh = ss.getSheetByName(DRANK_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(DRANK_SHEET);
+    sh.getRange(1, 1, 1, DRANK_COLUMNS.length).setValues([DRANK_COLUMNS]);
+    sh.hideSheet();
+    return sh;
+  }
+  var cur = sh.getRange(1, 1, 1, DRANK_COLUMNS.length).getValues()[0];
+  DRANK_COLUMNS.forEach(function (name, i) {
+    var have = String(cur[i] || '').trim();
+    if (have === name) return;
+    if (have) throw new Error('마셨어요 시트 ' + (i + 1) + '번째 칸 제목이 "' + have + '"예요("' + name + '"이어야 해요). 덮어쓰지 않고 멈췄어요');
+    sh.getRange(1, i + 1).setValue(name);
+  });
+  return sh;
+}
+
+function drankRows_(sh) {
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  return sh.getRange(2, 1, last - 1, DRANK_COLUMNS.length).getValues().map(function (r, i) {
+    var o = { rowIndex: i + 2 };
+    DRANK_COLUMNS.forEach(function (c, j) { o[c] = r[j]; });
+    return o;
+  });
+}
+
+/** 묶음키 → 마셨어요를 누른 아이디 목록(누른 순서) */
+function drankByGroup_() {
+  var out = {};
+  drankRows_(drankSheet_()).forEach(function (r) {
+    if (r['상태'] !== DRANK_ACTIVE) return;
+    var k = String(r['묶음키']).replace(/^'/, '');
+    var id = String(r['사용자']).trim();
+    if (!out[k]) out[k] = [];
+    if (out[k].indexOf(id) === -1) out[k].push(id);
+  });
+  return out;
+}
+
+/**
+ * 추천 게시글에 "나도 마셨어요"를 누르거나 취소한다(토글). recRow는 그 게시글의 추천 한 줄,
+ * expectedName은 그 추천의 와인명(그 사이 목록이 바뀌었으면 거절).
+ */
+function toggleDrankRec(token, recRow, expectedName) {
+  var me = String(requireUser_(token)['아이디']);
+  var rsh = recSheet_();
+  recRow = Number(recRow);
+  if (!recRow || recRow < 2 || recRow > rsh.getLastRow()) throw new Error('없는 추천이에요');
+  var rec = recRows_(rsh)[recRow - 2];
+  if (expectedName === undefined || expectedName === null || String(expectedName).trim() === '' ||
+      String(rec['와인명']).trim() !== String(expectedName).trim()) {
+    throw new Error('그 사이 목록이 바뀌었어요. 새로고침 후 다시 시도해주세요');
+  }
+  if (rec['상태'] !== REC_ACTIVE) return { error: '내려간 추천이에요. 새로고침해주세요' };
+  var key = recGroupKey_(rec['와인명'], rec['빈티지']);
+
+  var sh = drankSheet_();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) throw new Error('잠시 후 다시 시도해주세요');
+  try {
+    var mine = drankRows_(sh).filter(function (r) {
+      return r['상태'] === DRANK_ACTIVE && String(r['사용자']).trim() === me &&
+        String(r['묶음키']).replace(/^'/, '') === key;
+    });
+    var drank;
+    if (mine.length) {
+      mine.forEach(function (r) {
+        sh.getRange(r.rowIndex, DRANK_COLUMNS.indexOf('상태') + 1).setValue(REC_CANCELED);
+        sh.getRange(r.rowIndex, DRANK_COLUMNS.indexOf('취소일') + 1).setValue(todayStr_());
+      });
+      drank = false;
+    } else {
+      var row = { '묶음키': key, '와인명': String(rec['와인명']), '사용자': me, '상태': DRANK_ACTIVE, '날짜': todayStr_(), '취소일': '' };
+      sh.appendRow(DRANK_COLUMNS.map(function (c) { return asText_(row[c]); }));
+      drank = true;
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  var names = {};
+  userRows_().forEach(function (u) { names[String(u['아이디']).trim()] = String(u['이름'] || ''); });
+  var ids = drankByGroup_()[key] || [];
+  return { ok: true, drank: drank, '마셨어요': ids.map(function (id) { return names[id] || id; }) };
 }
 
 /* ===================== 내 잔 ===================== */
