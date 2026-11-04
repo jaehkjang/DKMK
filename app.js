@@ -1866,16 +1866,158 @@ function loadStats() {
   renderStats();
 }
 
+/* GRAPES:BEGIN — 품종 이름 묶기(tests/grape_test.js가 이 구간만 잘라서 검사한다) */
 /**
- * "품종" 필드에서 개별 품종 이름만 뽑아낸다(블렌드는 각 품종에 1씩).
- * 예: "카베르네 소비뇽 60%·메를로 40%" → ["카베르네 소비뇽", "메를로"]
+ * 같은 품종인데 나라마다 부르는 이름이 다르거나 한글 표기가 여러 가지인 경우를 한 묶음으로 본다.
+ * 시트에 적힌 값은 건드리지 않고 통계 화면에서만 묶어서 보여준다 — 그래서 예전 기록도,
+ * 앞으로 들어올 기록도 저장된 그대로 자동으로 같은 묶음에 들어간다.
+ *  - names: 화면에 보여줄 나라별 이름(국기, 이름). 두 개 이상이면 국기와 함께 나란히 표시
+ *  - aliases: 시트에 적혀 있을 수 있는 표기들(띄어쓰기·대소문자·악센트는 무시하고 비교)
  */
-function parseGrapesClient(raw) {
+var GRAPE_GROUPS = [
+  { names: [['🇫🇷', '시라'], ['🇦🇺', '쉬라즈']],
+    aliases: ['시라', '쉬라', '시라즈', '쉬라즈', '쉬라스', 'syrah', 'shiraz'] },
+  { names: [['🇫🇷', '그르나슈'], ['🇪🇸', '가르나차'], ['🇮🇹', '칸노나우']],
+    aliases: ['그르나슈', '그르나쉬', '그레나슈', '그레나쉬', '그르나슈누아', '가르나차', '가르나챠', '가르나차틴타', '칸노나우',
+      'grenache', 'grenachenoir', 'garnacha', 'garnachatinta', 'garnatxa', 'cannonau'] },
+  { names: [['🇪🇸', '템프라니요'], ['🇵🇹', '틴타 로리스']],
+    aliases: ['템프라니요', '템프라닐로', '뗌쁘라니요', '템쁘라니요', '틴토피노', '틴타델파이스', '틴타데토로', '틴타로리스', '틴타로리즈',
+      '아라고네스', '아라고네즈', 'tempranillo', 'tintofino', 'tintadelpais', 'tintadetoro', 'tintaroriz', 'aragonez', 'aragonês'] },
+  { names: [['🇫🇷', '피노 누아'], ['🇩🇪', '슈페트부르군더'], ['🇮🇹', '피노 네로']],
+    aliases: ['피노누아', '피노누아르', '피노느와', '피노느와르', '삐노누아', '피노네로', '슈페트부르군더', '슈패트부르군더', '블라우부르군더',
+      'pinotnoir', 'pinotnero', 'spätburgunder', 'blauburgunder'] },
+  { names: [['🇫🇷', '피노 그리'], ['🇮🇹', '피노 그리지오'], ['🇩🇪', '그라우부르군더']],
+    aliases: ['피노그리', '피노그리지오', '피노그리조', '삐노그리', '그라우부르군더', '룰랜더', 'pinotgris', 'pinotgrigio', 'grauburgunder', 'ruländer'] },
+  { names: [['🇫🇷', '피노 블랑'], ['🇮🇹', '피노 비앙코'], ['🇩🇪', '바이스부르군더']],
+    aliases: ['피노블랑', '삐노블랑', '피노비앙코', '바이스부르군더', 'pinotblanc', 'pinotbianco', 'weissburgunder', 'weißburgunder'] },
+  { names: [['🇫🇷', '무르베드르'], ['🇪🇸', '모나스트렐'], ['🇦🇺', '마타로']],
+    aliases: ['무르베드르', '무르베드레', '모나스트렐', '마타로', 'mourvèdre', 'monastrell', 'mataro'] },
+  { names: [['🇺🇸', '진판델'], ['🇮🇹', '프리미티보']],
+    aliases: ['진판델', '진펀델', '프리미티보', '프리미티부', 'zinfandel', 'primitivo'] },
+  { names: [['🇫🇷', '카리냥'], ['🇪🇸', '카리녜나'], ['🇮🇹', '카리냐노']],
+    aliases: ['카리냥', '까리냥', '카리냔', '카리녜나', '카리네나', '마수엘로', '마주엘로', '카리냐노', 'carignan', 'cariñena', 'mazuelo', 'carignano'] },
+  { names: [['🇦🇷', '말벡'], ['🇫🇷', '코']],
+    aliases: ['말벡', '말백', '말베크', '꼬', 'malbec', 'côt'] },
+  { names: [['🇫🇷', '슈냉 블랑'], ['🇿🇦', '스틴']],
+    aliases: ['슈냉블랑', '쉬냉블랑', '슈넹블랑', '쉬넹블랑', '스틴', 'cheninblanc', 'steen'] },
+  { names: [['🇮🇹', '트레비아노'], ['🇫🇷', '위니 블랑']],
+    aliases: ['트레비아노', '뜨레비아노', '위니블랑', 'trebbiano', 'ugniblanc'] },
+  { names: [['🇮🇹', '모스카토'], ['🇫🇷', '뮈스카'], ['🇪🇸', '모스카텔']],
+    aliases: ['모스카토', '모스까또', '모스카또', '모스카토비앙코', '뮈스카', '뮈스까', '뮈스카블랑아프티그랭', '머스캣', '무스카트', '모스카텔',
+      'moscato', 'moscatobianco', 'muscat', 'muscatblancàpetitsgrains', 'moscatel'] },
+  { names: [['🇪🇸', '알바리뇨'], ['🇵🇹', '알바리뉴']],
+    aliases: ['알바리뇨', '알바리노', '알바리뉴', 'albariño', 'alvarinho'] },
+  { names: [['🇮🇹', '베르멘티노'], ['🇫🇷', '롤']],
+    aliases: ['베르멘티노', '롤', 'vermentino', 'rolle'] },
+  { names: [['🇺🇸', '쁘띠 시라'], ['🇫🇷', '뒤리프']],
+    aliases: ['쁘띠시라', '쁘띠쉬라', '프티시라', '프티트시라', '쁘띠뜨시라', '뒤리프', 'petitesirah', 'petitsirah', 'durif'] },
+  { names: [['🇪🇸', '마카베오'], ['🇫🇷', '마카뵈']],
+    aliases: ['마카베오', '마카베우', '비우라', '마카뵈', 'macabeo', 'viura', 'maccabeu'] },
+  { names: [['🇦🇹', '블라우프랭키쉬'], ['🇩🇪', '렘베르거'], ['🇭🇺', '케크프랑코시']],
+    aliases: ['블라우프랭키쉬', '블라우프랭키시', '블라우프렌키쉬', '렘베르거', '케크프랑코시', 'blaufränkisch', 'lemberger', 'kékfrankos'] },
+  { names: [['🇫🇷', '샤르도네'], ['🇦🇹', '모리용']],
+    aliases: ['샤르도네', '샤도네이', '샤르도네이', '샤도네', '샤르도내', '모리용', 'chardonnay', 'morillon'] },
+  { names: [['🇫🇷', '소비뇽 블랑'], ['🇺🇸', '퓌메 블랑']],
+    aliases: ['소비뇽블랑', '쇼비뇽블랑', '쏘비뇽블랑', '소비뇽블랑크', '퓌메블랑', '퓨메블랑', 'sauvignonblanc', 'fuméblanc'] },
+  // 나라별 이름은 같고 한글 표기만 여러 가지인 품종
+  { names: [['', '카베르네 소비뇽']],
+    aliases: ['카베르네소비뇽', '까베르네소비뇽', '카베르네쇼비뇽', '까베르네쇼비뇽', '까쇼', '카버네소비뇽', 'cabernetsauvignon'] },
+  { names: [['', '카베르네 프랑']],
+    aliases: ['카베르네프랑', '까베르네프랑', '카버네프랑', 'cabernetfranc'] },
+  { names: [['', '메를로']],
+    aliases: ['메를로', '메를롯', '멀롯', '멜롯', '메를로트', 'merlot'] },
+  { names: [['', '쁘띠 베르도']],
+    aliases: ['쁘띠베르도', '프티베르도', '쁘띠베르도트', 'petitverdot'] },
+  { names: [['', '카르메네르']],
+    aliases: ['카르메네르', '까르메네르', '카르미네르', 'carménère'] },
+  { names: [['', '리슬링']],
+    aliases: ['리슬링', '리즐링', '리스링', 'riesling'] },
+  { names: [['', '게뷔르츠트라미너']],
+    aliases: ['게뷔르츠트라미너', '게뷔르츠트라미네르', '게부르츠트라미너', '게뷔르츠', 'gewürztraminer'] },
+  { names: [['', '세미용']],
+    aliases: ['세미용', '세미옹', '세미뇽', 'sémillon'] },
+  { names: [['', '비오니에']],
+    aliases: ['비오니에', '비오니에르', 'viognier'] },
+  { names: [['', '산지오베제']],
+    aliases: ['산지오베제', '산조베제', '산지오베세', '산지오베제그로소', '브루넬로', '프루뇰로젠틸레', '모렐리노', 'sangiovese', 'brunello', 'prugnologentile'] },
+  { names: [['', '네비올로']],
+    aliases: ['네비올로', '네비오로', '스판나', '키아벤나스카', 'nebbiolo', 'spanna', 'chiavennasca'] },
+  { names: [['', '그뤼너 펠트리너']],
+    aliases: ['그뤼너펠트리너', '그뤼너벨트리너', '그루너벨트리너', '그루너펠트리너', 'grünerveltliner'] },
+  { names: [['', '피노 뫼니에']],
+    aliases: ['피노뫼니에', '피노므니에', '뫼니에', '므니에', 'pinotmeunier', 'meunier'] },
+  { names: [['', '글레라']],
+    aliases: ['글레라', '프로세코', 'glera', 'prosecco'] },
+  { names: [['', '가메']],
+    aliases: ['가메', '가메이', 'gamay'] }
+];
+
+/** 띄어쓰기·하이픈·대소문자·악센트 차이를 지워서 비교용 열쇠로 만든다 */
+function grapeKey(s) {
+  var t = String(s || '').toLowerCase();
+  if (t.normalize) t = t.normalize('NFD').replace(/[̀-ͯ]/g, '').normalize('NFC');
+  return t.replace(/[\s\-_.'’`]/g, '');
+}
+
+var GRAPE_ALIAS_INDEX = (function () {
+  var idx = {};
+  GRAPE_GROUPS.forEach(function (g, i) {
+    g.id = 'g' + i;
+    g.label = g.names.map(function (n) { return n[1]; }).join(' / ');
+    g.aliases.concat(g.names.map(function (n) { return n[1]; }))
+      .forEach(function (a) { idx[grapeKey(a)] = g; });
+  });
+  return idx;
+})();
+
+/** "블렌드", "GSM" 처럼 품종 칸에 블렌딩이라고만 적힌 경우 */
+var BLEND_WORD_RE = /블렌드|블렌딩|블랜드|블랜딩|blend|assemblage|gsm/i;
+
+/**
+ * "품종" 칸 하나를 품종별 조각으로 나눈다.
+ * 예: "카베르네 소비뇽 60%·메를로(Merlot) 40%"
+ *   → [{ name:"카베르네 소비뇽", pct:"60%", group:{...} }, { name:"메를로", pct:"40%", group:{...} }]
+ * 괄호 안 영문 병기는 이름에서 빼되, 괄호 밖 이름으로 못 찾으면 괄호 안으로도 찾아본다.
+ */
+function parseGrapeParts(raw) {
   return String(raw || '')
-    .split(/[·,、]/)
-    .map(function (s) { return s.replace(/\d+(\.\d+)?\s*%/g, '').replace(/[()]/g, '').trim(); })
+    // "보르도 블렌드 (카베르네 소비뇽, 메를로)"처럼 괄호 안이 목록이면 괄호를 풀어 목록으로 본다
+    .replace(/\(([^()]*[·,、/+&][^()]*)\)/g, ', $1')
+    .split(/[·,、/+&]|\s및\s/)
+    .map(function (s) {
+      var pctM = s.match(/\d+(\.\d+)?\s*%/);
+      var noPct = s.replace(/\d+(\.\d+)?\s*%/g, '');
+      var inner = (noPct.match(/\(([^)]*)\)/) || [])[1] || '';
+      var outer = noPct.replace(/\([^)]*\)?/g, '').replace(/[()]/g, '').trim();
+      var name = outer || inner.trim();
+      if (!name) return null;
+      var group = GRAPE_ALIAS_INDEX[grapeKey(outer)] || (inner && GRAPE_ALIAS_INDEX[grapeKey(inner)]) || null;
+      return { name: name, pct: pctM ? pctM[0].replace(/\s+/g, '') : '', group: group, blendWord: BLEND_WORD_RE.test(name) };
+    })
     .filter(Boolean);
 }
+
+/**
+ * 와인 한 병의 품종 분류.
+ *  - kind 'single': 한 품종(나라별 이름이 달라도 같은 묶음이면 한 품종) → key·label·names
+ *  - kind 'blend' : 서로 다른 품종이 둘 이상이거나 "블렌드"라고 적힘 → parts에 들어간 품종들
+ *  - kind 'unknown': 품종 칸이 비어 있음
+ */
+function classifyGrapes(raw) {
+  var parts = parseGrapeParts(raw);
+  var real = parts.filter(function (p) { return !p.blendWord; });
+  var seen = {}, distinct = [];
+  real.forEach(function (p) {
+    var k = p.group ? p.group.id : 'n:' + grapeKey(p.name);
+    if (!seen[k]) { seen[k] = true; distinct.push(p); }
+  });
+  if (!parts.length) return { kind: 'unknown' };
+  if (distinct.length >= 2 || real.length < parts.length) return { kind: 'blend', parts: real };
+  var p = distinct[0];
+  if (p.group) return { kind: 'single', key: p.group.id, label: p.group.label, names: p.group.names };
+  return { kind: 'single', key: 'n:' + grapeKey(p.name), label: p.name, names: [['', p.name]] };
+}
+/* GRAPES:END */
 
 /** 가격대 구간 — 파이 조각과 범례를 싼 것부터 비싼 것 순으로 늘어놓는 기준이기도 하다 */
 var PRICE_BRACKETS = ['3만원 미만', '3~7만원', '7~15만원', '15만원 이상', '가격정보없음'];
@@ -1886,7 +2028,7 @@ var PRICE_BRACKETS = ['3만원 미만', '3~7만원', '7~15만원', '15만원 이
  */
 function computeStats(wines) {
   var drunk = wines.filter(function (w) { return w['상태'] === '마심'; });
-  var byMonth = {}, byType = {}, byGrape = {}, byPrice = {};
+  var byMonth = {}, byType = {}, byGrape = {}, byPrice = {}, blends = [], unknownGrape = [];
   function add(obj, k, w) { (obj[k] = obj[k] || []).push(w); }
   drunk.forEach(function (w) {
     var month = (w['마신날짜'] || '').slice(0, 7);
@@ -1894,11 +2036,14 @@ function computeStats(wines) {
 
     add(byType, w['종류'] || '기타', w);
 
-    var grapes = parseGrapesClient(w['품종']);
-    if (!grapes.length) grapes = ['품종 미상'];
-    // 같은 품종이 한 와인에 두 번 적혀 있어도 그 와인은 한 번만 센다
-    grapes.filter(function (g, i) { return grapes.indexOf(g) === i; })
-      .forEach(function (g) { add(byGrape, g, w); });
+    // 나라마다 이름이 다른 같은 품종은 한 묶음으로, 여러 품종이 섞인 와인은 "블렌딩 와인"으로 따로 센다
+    var c = classifyGrapes(w['품종']);
+    if (c.kind === 'blend') blends.push(w);
+    else if (c.kind === 'unknown') unknownGrape.push(w);
+    else {
+      if (!byGrape[c.key]) byGrape[c.key] = { label: c.label, names: c.names, wines: [] };
+      byGrape[c.key].wines.push(w);
+    }
 
     var priceMatch = String(w['평균가격(국내·원)'] || '').match(/[\d,]+/);
     var priceNum = priceMatch ? parseInt(priceMatch[0].replace(/,/g, ''), 10) : 0;
@@ -1909,7 +2054,8 @@ function computeStats(wines) {
       : PRICE_BRACKETS[3];
     add(byPrice, bracket, w);
   });
-  return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byGrape: byGrape, byPrice: byPrice };
+  return { totalDrunk: drunk.length, byMonth: byMonth, byType: byType, byGrape: byGrape, byPrice: byPrice,
+    blends: blends, unknownGrape: unknownGrape };
 }
 
 /**
@@ -1954,8 +2100,8 @@ function repeatHistoryHtml(groups) {
  * 그대로 넣으면 따옴표 이스케이프가 까다로워서, 목록은 여기 모아 두고 번호로만 가리킨다.
  */
 var STAT_LISTS = [];
-function statListRef(title, wines) {
-  STAT_LISTS.push({ title: title, wines: wines });
+function statListRef(title, wines, blend) {
+  STAT_LISTS.push({ title: title, wines: wines, blend: !!blend });
   return STAT_LISTS.length - 1;
 }
 
@@ -1968,21 +2114,72 @@ function openStatList(i) {
   document.getElementById('statListBody').innerHTML =
     '<h3>' + esc(item.title) + '</h3>' +
     '<div class="stat-list-sub">' + wines.length + '병 · 최근에 마신 순</div>' +
-    wines.map(function (w) { return cardHtml(w); }).join('') +
+    (item.blend ? blendSummaryHtml(wines) : '') +
+    wines.map(function (w) { return cardHtml(w, item.blend ? blendMixHtml(w) : ''); }).join('') +
     '<button class="more-toggle" onclick="cm(\'statListModal\')">닫기</button>';
   om('statListModal');
   document.querySelector('#statListModal .modal').scrollTop = 0;
 }
 
-/** 막대그래프 — 항목 수가 많은(품종) 데이터용 */
-function statBarsHtml(label, entries, color) {
-  var max = entries.reduce(function (m, e) { return Math.max(m, e[1].length); }, 1);
-  return entries.map(function (e) {
-    var ref = statListRef(label + ' · ' + e[0], e[1]);
-    return '<div class="bar-row tap" onclick="openStatList(' + ref + ')"><div class="k">' + esc(e[0]) + '</div>' +
-      '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:' + color + ';width:' + (e[1].length / max * 100) + '%"></div></div>' +
-      '<div class="n">' + e[1].length + '</div><span class="chev">›</span></div></div>';
+/** 품종 묶음 이름 — 나라별 이름이 여러 개면 이름마다 작은 국기를 붙여 나란히 보여준다 */
+function grapeNamesHtml(names) {
+  if (names.length < 2) return esc(names[0][1]);
+  return names.map(function (n) {
+    return '<span class="gname">' + (n[0] ? '<span class="gflag">' + n[0] + '</span>' : '') + esc(n[1]) + '</span>';
+  }).join('<span class="gsep">/</span>');
+}
+
+/**
+ * 품종별 막대그래프. 단일 품종(나라별 이름 묶음)은 많은 순으로, 그 아래에
+ * "블렌딩 와인"과 "품종 미상"을 따로 둔다.
+ */
+function grapeBarsHtml(s) {
+  var rows = Object.keys(s.byGrape).map(function (k) { return s.byGrape[k]; })
+    .sort(function (a, b) { return b.wines.length - a.wines.length; })
+    .map(function (g) {
+      return { html: grapeNamesHtml(g.names), title: '품종별 · ' + g.label, wines: g.wines, color: 'var(--wine)' };
+    });
+  if (s.blends.length) rows.push({ html: '🍇 블렌딩 와인', title: '블렌딩 와인', wines: s.blends, color: 'var(--gold)', blend: true });
+  if (s.unknownGrape.length) rows.push({ html: '품종 미상', title: '품종별 · 품종 미상', wines: s.unknownGrape, color: 'var(--line)' });
+  var max = rows.reduce(function (m, r) { return Math.max(m, r.wines.length); }, 1);
+  return rows.map(function (r) {
+    var ref = statListRef(r.title, r.wines, r.blend);
+    return '<div class="bar-row tap' + (r.blend ? ' blend-row' : '') + '" onclick="openStatList(' + ref + ')"><div class="k gk">' + r.html +
+      (r.blend ? '<span class="sect-note">눌러서 섞인 품종 보기</span>' : '') + '</div>' +
+      '<div class="row2"><div class="bar-wrap"><div class="bar" style="--c:' + r.color + ';width:' + (r.wines.length / max * 100) + '%"></div></div>' +
+      '<div class="n">' + r.wines.length + '</div><span class="chev">›</span></div></div>';
   }).join('');
+}
+
+/** 블렌딩 와인 목록 맨 위: 블렌딩에 들어간 품종을 많이 쓰인 순으로 */
+function blendSummaryHtml(wines) {
+  var counts = {}, order = [], names = {};
+  wines.forEach(function (w) {
+    var c = classifyGrapes(w['품종']);
+    var seen = {};
+    (c.parts || []).forEach(function (p) {
+      var k = p.group ? p.group.id : 'n:' + grapeKey(p.name);
+      if (seen[k]) return;
+      seen[k] = true;
+      if (!counts[k]) { counts[k] = 0; order.push(k); names[k] = p.group ? p.group.names : [['', p.name]]; }
+      counts[k]++;
+    });
+  });
+  if (!order.length) return '';
+  order.sort(function (a, b) { return counts[b] - counts[a]; });
+  return '<div class="blend-sum"><div class="blend-sum-t">블렌딩에 들어간 품종 <span class="sect-note">숫자는 그 품종이 들어간 병 수</span></div>' +
+    order.map(function (k) { return '<span class="blend-chip">' + grapeNamesHtml(names[k]) + ' <b>' + counts[k] + '</b></span>'; }).join('') +
+    '</div>';
+}
+
+/** 블렌딩 와인 카드에 붙이는 "어떤 품종이 섞였는지" 줄. 시트에 적힌 이름·비율 그대로 보여준다 */
+function blendMixHtml(w) {
+  var c = classifyGrapes(w['품종']);
+  var parts = c.parts || [];
+  var body = parts.length
+    ? parts.map(function (p) { return '<span class="blend-part">' + esc(p.name) + (p.pct ? ' <small>' + esc(p.pct) + '</small>' : '') + '</span>'; }).join('')
+    : '<span class="blend-part">' + esc(w['품종']) + '</span>';
+  return '<div class="blend-mix">🍇 ' + body + '</div>';
 }
 
 /** "2025-03" → "25.3" (달력 눈금 라벨용, 짧게) */
@@ -2089,8 +2286,8 @@ function renderStats() {
     '<div class="sect">종류별</div>' + statPieHtml('종류별', sortedEntries(s.byType), function (k) { return typeStyle(k).c; }) +
     '<div class="sect">가격대별</div>' + statPieHtml('가격대별', priceEntries, function (k) { return PRICE_COLORS[k]; }) +
     '<div class="sect">월별</div>' + statTrendHtml('월별', monthEntries, 'var(--wine)') +
-    '<div class="sect">품종별 <span class="sect-note">블렌드는 품종마다 한 번씩 세요</span></div>' +
-    statBarsHtml('품종별', sortedEntries(s.byGrape), 'var(--wine)') +
+    '<div class="sect">품종별 <span class="sect-note">나라마다 이름이 다른 같은 품종은 묶고, 블렌딩 와인은 따로 모았어요</span></div>' +
+    grapeBarsHtml(s) +
     repeatHistoryHtml(computeRepeatHistory(ALL_WINES)) +
     '<div style="text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--sub)">' +
     '🍷 ' + esc(ME) + ' 셀러</div>';
