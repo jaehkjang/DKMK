@@ -593,12 +593,27 @@ function handleAuthExpired() {
 
 /* ---------- 화면 전환 ---------- */
 var TITLES = { Cellar:'셀러', Food:'페어링 추천', Rec:'추천', Stat:'기록' };
+
+/**
+ * 앱 버전 — index.html에서 app.js를 부를 때 붙인 ?v= 값(배포할 때마다 올림)을 그대로 쓴다.
+ * 그래서 버전을 따로 적어 둘 곳이 없고, 폰이 지금 어느 배포본을 쓰고 있는지가 정확히 보인다.
+ * 예: "20261104b" → "v2026.11.04b"
+ */
+function appVersionText() {
+  var el = document.querySelector('script[src*="app.js"]');
+  var m = el && String(el.getAttribute('src')).match(/[?&]v=([^&]+)/);
+  if (!m) return '';
+  var d = m[1].match(/^(\d{4})(\d{2})(\d{2})(.*)$/);
+  return 'v' + (d ? d[1] + '.' + d[2] + '.' + d[3] + d[4] : m[1]);
+}
 function showPage(p) {
   ['Cellar', 'Food', 'Rec', 'Stat'].forEach(function (n) {
     document.getElementById('pg' + n).classList.toggle('on', n === p);
   });
   document.querySelectorAll('#tabbar div').forEach(function (t) { t.classList.toggle('on', t.dataset.p === p); });
   document.getElementById('pgTitle').textContent = TITLES[p];
+  // 버전은 홈(셀러) 탭 제목 옆에만 작게 보여준다
+  document.getElementById('appVer').textContent = p === 'Cellar' ? appVersionText() : '';
   document.getElementById('pgCount').textContent = '';
   // 이미 한 번 불러온 목록이 있으면 일단 캐시로 즉시 그려서 탭 전환이 빠르게 느껴지게
   // 하고, 그 뒤에 곧바로 서버에서 다시 불러와 조용히 최신 상태로 맞춘다 — 같은 아이디를
@@ -2293,6 +2308,7 @@ function renderStats() {
     '🍷 ' + esc(ME) + ' 셀러</div>';
 }
 
+document.getElementById('appVer').textContent = appVersionText();
 renderTypeChips();
 renderQuickFoods();
 renderInstallHowto();

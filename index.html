@@ -16,7 +16,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
   <!-- ?v= 는 배포할 때마다 바꾼다. 폰이 예전 CSS/JS를 붙잡고 있어서 새 HTML과 안 맞는 일을 막으려는 것 -->
-  <link rel="stylesheet" href="style.css?v=20261104a">
+  <link rel="stylesheet" href="style.css?v=20261104b">
 </head>
 <body>
 
@@ -42,7 +42,7 @@
 
   <header>
     <div class="row">
-      <h1 id="pgTitle">셀러</h1>
+      <div class="title-wrap"><h1 id="pgTitle">셀러</h1><span class="app-ver" id="appVer"></span></div>
       <div class="row-right">
         <span class="count" id="pgCount"></span>
         <button type="button" class="help-btn" onclick="openHelp()">기능설명</button>
@@ -312,7 +312,7 @@
 
   <div id="toast"></div>
 
-  <script src="api.js?v=20261104a"></script>
-  <script src="app.js?v=20261104a"></script>
+  <script src="api.js?v=20261104b"></script>
+  <script src="app.js?v=20261104b"></script>
 </body>
 </html>
