@@ -60,6 +60,8 @@
     header { padding:20px 16px 12px; }
     header .row { display:flex; align-items:baseline; justify-content:space-between; }
     header h1 { margin:0; font-size:24px; font-weight:800; letter-spacing:-.6px; }
+    header .title-wrap { display:flex; align-items:baseline; gap:6px; min-width:0; }
+    .app-ver { font-size:11px; font-weight:600; color:var(--sub); opacity:.75; white-space:nowrap; }
     header .row-right { display:flex; align-items:center; gap:10px; }
     header .count { font-size:13px; color:var(--sub); }
     .settings-btn { border:none; background:transparent; font-size:19px; padding:2px 0 2px 4px; line-height:1; cursor:pointer; }
