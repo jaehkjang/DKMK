@@ -22,3 +22,5 @@ jobs:
           cp Code.gs "$RUNNER_TEMP/Code.js" && node --check "$RUNNER_TEMP/Code.js"
       - name: 백엔드 테스트
         run: node tests/backend_test.js
+      - name: 품종 묶기 테스트
+        run: node tests/grape_test.js
