@@ -907,7 +907,11 @@ function styleChartHtml(w) {
     ['타닌', w['타닌'], '부드러움', '떫음'],
     ['바디감', w['바디감'], '가벼움', '묵직함']
   ];
-  var rows = dims.filter(function (d) { return d[1]; });
+  // 1~5가 아닌 값(예: 시트 칸이 날짜 서식이라 "1899-12-31"로 온 값)은 막대를 그리지 않는다
+  var rows = dims.filter(function (d) {
+    var n = parseInt(d[1], 10);
+    return String(d[1]).indexOf('-') === -1 && n >= 1 && n <= 5;
+  });
   if (!rows.length) return '';
   return '<div class="sect" style="margin:20px 0 6px">🍇 와인 스타일</div>' +
     rows.map(function (d) {

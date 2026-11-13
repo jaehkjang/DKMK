@@ -730,4 +730,19 @@ test('계정 삭제 때 그 사람의 마셨어요 표시도 지운다(백업 �
   assert.deepStrictEqual(env.call('getRecommendations', { token: kim })[0]['마셨어요'], ['dkmk']);
 });
 
+test('스타일 점수 칸이 날짜 서식이어도 1~5 숫자로 내려가고, 시트 값은 그대로', () => {
+  const env = makeEnv({ sheets: oldSheets() });
+  const token = setupUser(env, 'kim', '1234');
+  const sheet = env.ss.sheets[0];
+  const headers = sheet.rows[0];
+  // 시트가 날짜 서식 칸의 숫자 n을 돌려주는 모습 (instanceof Date가 통하도록 Code.gs 쪽 Date로 만든다)
+  const day = n => vm.runInContext('new Date(Date.UTC(1899, 11, ' + (30 + n) + '))', env.ctx);
+  const scores = { 당도: 1, 산도: 4, 타닌: 2, 바디감: 3 };
+  Object.keys(scores).forEach(k => { sheet.rows[1][headers.indexOf(k)] = day(scores[k]); });
+  const before = sheet.rows[1].slice();
+  const w = env.call('getWines', { token }).wines.find(x => x['와인명'] === '샤토 A');
+  Object.keys(scores).forEach(k => assert.strictEqual(w[k], scores[k], k));
+  assert.deepStrictEqual(sheet.rows[1], before, '읽기만 하고 시트 값은 안 바뀜');
+});
+
 console.log(passed + '개 통과' + (process.exitCode ? ' (실패 있음)' : ''));
