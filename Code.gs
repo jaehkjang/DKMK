@@ -551,6 +551,39 @@ function colIndex1_(headers, name) {
   return idx + 1;
 }
 
+/** 와인 스타일 점수(각 1~5) 컬럼 */
+var STYLE_COLUMNS = ['당도', '산도', '타닌', '바디감'];
+
+/**
+ * 스타일 점수 칸이 날짜 서식이면 시트는 숫자 1·2·3을 1899-12-31·1900-01-01·1900-01-02
+ * 같은 날짜로 돌려준다(구글 시트의 날짜 0번은 1899-12-30). 그대로 'yyyy-MM-dd'로 바꾸면
+ * 화면에 "1899/5"처럼 연도가 점수로 보인다. 날짜로 읽혔으면 원래 숫자로 되돌린다.
+ * 시트 값 자체는 건드리지 않는다(읽을 때만 바꿈).
+ */
+function styleScoreValue_(v, tz) {
+  if (!(v instanceof Date)) return v;
+  var p = Utilities.formatDate(v, tz || Session.getScriptTimeZone() || 'Asia/Seoul', 'yyyy-MM-dd').split('-');
+  var days = Math.round((Date.UTC(+p[0], +p[1] - 1, +p[2]) - Date.UTC(1899, 11, 30)) / 86400000);
+  return (days >= 1 && days <= 5) ? days : '';
+}
+
+/**
+ * 일회성 정리 함수(편집기에서 실행). 스타일 점수 네 칸의 표시 형식을 날짜 → 숫자로
+ * 바꾼다. 값은 그대로이고 보이는 형식만 바뀐다. 그래도 원칙대로 먼저 백업한다.
+ */
+function fixStyleColumnFormat() {
+  backupNow_('fixStyleColumnFormat 실행 전');
+  var sheet = getSheet_();
+  var headers = getHeaders_();
+  var rows = Math.max(sheet.getMaxRows() - 1, 1);
+  STYLE_COLUMNS.forEach(function (name) {
+    var idx = headers.indexOf(name);
+    if (idx === -1) return;
+    sheet.getRange(2, idx + 1, rows, 1).setNumberFormat('0');
+  });
+  Logger.log('스타일 점수 칸 표시 형식을 숫자로 바꿨어요');
+}
+
 function todayStr_() {
   var tz = Session.getScriptTimeZone() || 'Asia/Seoul';
   return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
@@ -1087,6 +1120,7 @@ function getWines(token) {
     var obj = { rowIndex: i + 2 };
     for (var c = 0; c < headers.length; c++) {
       var v = row[c];
+      if (STYLE_COLUMNS.indexOf(headers[c]) !== -1) v = styleScoreValue_(v, tz);
       obj[headers[c]] = (v instanceof Date) ? Utilities.formatDate(v, tz, 'yyyy-MM-dd') : v;
     }
     wines.push(obj);
@@ -1783,7 +1817,10 @@ function suggestWineInfo(token, rowIndex) {
   Object.keys(updates).forEach(function (h) {
     var idx = headers.indexOf(h);
     if (idx === -1) { out[h] = ''; return; }
-    if (fresh[idx]) { out[h] = fresh[idx]; return; } // 이미 값이 있으면 그대로 둔다
+    if (fresh[idx]) { // 이미 값이 있으면 그대로 둔다
+      out[h] = STYLE_COLUMNS.indexOf(h) !== -1 ? styleScoreValue_(fresh[idx]) : fresh[idx];
+      return;
+    }
     if (updates[h] === '') { out[h] = ''; return; }
     fresh[idx] = updates[h];
     out[h] = updates[h];
